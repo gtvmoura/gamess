@@ -19,6 +19,13 @@ var speed := 3.0  # casas por segundo
 var path: Array[Vector2] = []
 var spot_index := -1
 var worker := false
+# dados do "cliente" (aparecem ao tocar no carro)
+var cname := ""
+var job := ""
+var hours := 0.0
+var spent := 0.0
+var status := ""
+var angry := false
 var kind := 0  # 0 carro, 1 caminhonete, 2 ônibus
 
 

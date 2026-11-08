@@ -76,6 +76,14 @@ func _run() -> void:
 	Game.changed.emit()
 	await _wait(16.0)
 	await _shot("03_crescimento")
+	# ficha de um cliente (toque no carro)
+	for c in _world().objects.get_children():
+		if c.get_script() == _world().CarScript and c.cname != "" and not c.angry:
+			_ui().show_customer(c)
+			await _wait(1.0)
+			await _shot("03b_cliente")
+			_ui().close_window()
+			break
 	await _tabs("04_crescimento")
 
 	# Metrópole

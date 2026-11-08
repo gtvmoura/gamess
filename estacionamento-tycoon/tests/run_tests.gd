@@ -115,6 +115,22 @@ func _initialize() -> void:
 	check(g.stay_factor() < sf, "manobrista acelera o giro")
 	check(g.fire("valet") and g.staff_count("valet") == 0, "demite funcionário")
 
+	# Avaliação e conquistas
+	var tr0: float = g.target_rating()
+	for i in 30:
+		g.note_lost_customer()
+	check(g.target_rating() < tr0, "clientes perdidos (lotado) derrubam a avaliação")
+	g.rating = 5.0
+	var ch5: float = g.enter_chance()
+	g.rating = 1.0
+	check(g.enter_chance() < ch5, "avaliação baixa reduz a entrada")
+	g.rating = 3.5
+	g.check_achievements()
+	check(g.achievements.has("first"), "conquista do primeiro cliente")
+	var gems_a: int = g.gems
+	g.check_achievements()
+	check(g.gems == gems_a, "conquista não paga duas vezes")
+
 	# Moradores x empregos
 	g.lvl.city = 10
 	g.lvl.jobs = 0
@@ -182,6 +198,7 @@ func _initialize() -> void:
 	check(is_equal_approx(g2.population(), g.population()), "save mantém moradores")
 	check(g2.day == g.day, "save mantém o dia")
 	check(g2.rlvl("digital") == 1, "save mantém pesquisas")
+	check(g2.achievements.has("first"), "save mantém conquistas")
 	check(g2.service_lvl("wash") == 1 and g2.staff_count("washer") == 1, "save mantém serviços e funcionários")
 	check(is_equal_approx(g2.price(), g.price()), "save mantém o preço")
 	check(g2.districts_unlocked == g.districts_unlocked, "save mantém bairros")

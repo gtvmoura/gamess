@@ -21,6 +21,10 @@ const LEFT_LANE_X := 18.25
 const RIGHT_LANE_X := 31.5
 const TOP_AISLE_Y := 17.5
 const SPOTS_PER_ROW := 24
+const FIRST_NAMES := ["Ana", "Bruno", "Carla", "Diego", "Eduarda", "Felipe", "Gabriela", "Henrique", "Isabela", "João", "Larissa", "Lucas", "Mariana", "Mateus", "Natália", "Otávio", "Paula", "Rafael", "Sofia", "Thiago", "Vitória", "Gustavo", "Beatriz", "Pedro", "Camila", "Rodrigo", "Juliana", "André"]
+const LAST_NAMES := ["Silva", "Souza", "Oliveira", "Santos", "Pereira", "Lima", "Costa", "Ferreira", "Almeida", "Carvalho", "Ribeiro", "Martins", "Rocha", "Moura", "Barbosa", "Gomes"]
+const JOBS := ["Enfermeira(o)", "Professor(a)", "Engenheiro(a)", "Vendedor(a)", "Programador(a)", "Advogado(a)", "Contador(a)", "Médico(a)", "Arquiteto(a)", "Bancário(a)", "Recepcionista", "Gerente de loja", "Analista", "Designer"]
+const ERRANDS := ["Fazendo compras", "Indo ao banco", "Almoçando no centro", "Indo ao cinema", "Consulta médica", "Passeando no comércio", "Buscando encomenda"]
 const SERVICE_Y0 := 30.35   # faixa no fundo do estacionamento reservada aos serviços
 const SERVICE_SLOTS := {"wash": [18.2, 2.6], "cafe": [21.3, 1.9], "ev": [23.7, 2.6], "tire": [26.8, 2.6]}
 const LANE := 0.2
@@ -110,6 +114,10 @@ func focus_district(i: int) -> void:
 
 func _on_tapped(world_pos: Vector2) -> void:
 	if ui == null:
+		return
+	var car = car_at(world_pos)
+	if car != null:
+		ui.show_customer(car)
 		return
 	var g := Iso.to_grid(world_pos)
 	if LOT.has_point(g):
@@ -502,6 +510,7 @@ func _process(delta: float) -> void:
 		_traffic_timer = 0.0
 		_spawn_traffic()
 	_fx_budget = minf(_fx_budget + delta * 4.0, 4.0)
+	_angry_cd = maxf(0.0, _angry_cd - delta)
 	var n := 0
 	for c in spot_cars:
 		if c != null:
@@ -541,10 +550,56 @@ func _spawn_passer() -> void:
 	car.go(route.slice(1), ROAD_SPEED * rng.randf_range(0.9, 1.1))
 
 
+## Cliente chega, vê o estacionamento lotado e vai embora.
+var _angry_cd := 0.0
+
+
+func _angry_customer() -> void:
+	if _angry_cd > 0.0:
+		return
+	_angry_cd = 2.5
+	var from_left := rng.randf() < 0.5
+	var x0 := 0.5 if from_left else MAP - 0.5
+	var x1 := MAP - 0.5 if from_left else 0.5
+	var road := _lane([Vector2(x0, 16.5), Vector2(x1, 16.5)])
+	var car = _new_car(road[0])
+	car.angry = true
+	car.cname = _random_name()
+	car.job = "Queria estacionar"
+	car.status = "Desistiu: estacionamento lotado!"
+	car.arrived.connect(_despawn.bind(car), CONNECT_ONE_SHOT)
+	car.go(road.slice(1), ROAD_SPEED * 0.8)
+	var t := get_tree().create_timer(absf(ENTRY_X - x0) / (ROAD_SPEED * 0.8))
+	t.timeout.connect(_angry_text.bind(car))
+
+
+func _angry_text(car) -> void:
+	if is_instance_valid(car):
+		_floating_text("Lotado!", Iso.pg(car.grid, 30.0), Color("ff5a5a"), true)
+
+
+func _random_name() -> String:
+	return "%s %s" % [FIRST_NAMES[rng.randi_range(0, FIRST_NAMES.size() - 1)], LAST_NAMES[rng.randi_range(0, LAST_NAMES.size() - 1)]]
+
+
+## Carro mais perto do toque (para mostrar os dados do cliente).
+func car_at(world_pos: Vector2):
+	var best = null
+	var best_d := 28.0 / maxf(0.3, camera.zoom.x)
+	for c in objects.get_children():
+		if c.get_script() == CarScript and c.cname != "":
+			var d: float = (c.position - Vector2(0, 8)).distance_to(world_pos)
+			if d < best_d:
+				best_d = d
+				best = c
+	return best
+
+
 func _try_arrival(worker: bool) -> void:
 	var idx := _free_spot()
 	if idx == -1:
-		Game.lost_customers += 1
+		Game.note_lost_customer()
+		_angry_customer()
 	else:
 		_spawn_arrival(idx, worker)
 
@@ -700,6 +755,10 @@ func _spawn_arrival(idx: int, worker: bool) -> void:
 		car.queue_redraw()
 	car.spot_index = idx
 	car.worker = worker
+	car.cname = _random_name()
+	car.job = JOBS[rng.randi_range(0, JOBS.size() - 1)] if worker else ERRANDS[rng.randi_range(0, ERRANDS.size() - 1)]
+	car.hours = roundf((rng.randf_range(4.0, 8.0) if worker else rng.randf_range(1.0, 2.0)) * 2.0) / 2.0
+	car.status = "Chegando ao estacionamento"
 	spot_cars[idx] = car
 	var c := spot_center(idx)
 	var aisle := spot_aisle(idx)
@@ -718,6 +777,7 @@ func _on_car_parked(car) -> void:
 		_despawn(car)
 		return
 	Game.car_parked()
+	car.status = "Estacionado"
 	var base: float = (Game.STAY_WORK_SECONDS if car.worker else Game.STAY_SHOP_SECONDS) * Game.stay_factor()
 	var stay := rng.randf_range(base * 0.7, base * 1.3)
 	get_tree().create_timer(stay).timeout.connect(_car_leave.bind(car))
@@ -727,13 +787,16 @@ func _car_leave(car) -> void:
 	if not is_instance_valid(car):
 		return
 	var idx: int = car.spot_index
-	var hours: float = rng.randf_range(4.0, 8.0) if car.worker else rng.randf_range(1.0, 2.0)
-	var paid := Game.car_paid(Game.price() * roundf(hours * 2.0) / 2.0)
+	var hours: float = car.hours if car.hours > 0.0 else 1.0
+	var paid := Game.car_paid(Game.price() * hours)
+	car.spent += paid
+	car.status = "Indo embora"
 	_floating_text("+" + Game.money_str(paid), Iso.pg(car.grid, 26.0))
 	var extra := Game.roll_services(rng)
 	for i in extra.size():
 		var e: Array = extra[i]
 		_floating_text("+%s %s" % [Game.money_str(e[1]), e[0]], Iso.pg(car.grid, 44.0 + 16.0 * i), Color("7fe7ff"))
+		car.spent += float(e[1])
 	var aisle := spot_aisle(idx)
 	var pts: Array = [
 		Vector2(car.grid.x, aisle), Vector2(RIGHT_LANE_X, aisle),
@@ -747,10 +810,10 @@ func _car_leave(car) -> void:
 	_leaving.append(car)
 
 
-func _floating_text(text: String, pos: Vector2, color: Color = Color("7dff7a")) -> void:
-	if _fx_budget < 1.0 or camera.zoom.x < 0.45:
+func _floating_text(text: String, pos: Vector2, color: Color = Color("7dff7a"), force: bool = false) -> void:
+	if camera.zoom.x < 0.45 or (_fx_budget < 1.0 and not force):
 		return
-	_fx_budget -= 1.0
+	_fx_budget = maxf(0.0, _fx_budget - 1.0)
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_size_override("font_size", 18)

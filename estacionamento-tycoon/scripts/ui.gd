@@ -35,6 +35,9 @@ var refreshers: Array[Callable] = []
 var _refresh_acc := 0.0
 var top_inset := 0.0
 var fps_label: Label
+var stars: Control
+var rating_label: Label
+var customer = null
 var price_slider: HSlider
 var window_scroll: ScrollContainer
 
@@ -93,17 +96,40 @@ func _box(color: Color, radius: int = 18, pad: int = 12) -> StyleBoxFlat:
 	return sb
 
 
+## Botão com "relevo": borda inferior mais escura que some ao apertar.
+func _bbox(color: Color, radius: int = 14, pad: int = 14, pressed: bool = false) -> StyleBoxFlat:
+	var sb := _box(color, radius, pad)
+	sb.border_color = color.darkened(0.4)
+	sb.border_width_bottom = 1 if pressed else 5
+	if pressed:
+		sb.content_margin_top += 4
+	sb.anti_aliasing = true
+	return sb
+
+
 func _make_theme() -> Theme:
 	var t := Theme.new()
+	var font_file = load("res://assets/fonts/Fredoka.ttf")
+	if font_file != null:
+		var fv := FontVariation.new()
+		fv.base_font = font_file
+		fv.variation_opentype = {TextServer.name_to_tag("wght"): 560}
+		t.default_font = fv
 	t.default_font_size = 24
 	t.set_color("font_color", "Label", Color.WHITE)
 	t.set_color("font_outline_color", "Label", Color(0, 0, 0, 0.6))
 	t.set_constant("outline_size", "Label", 4)
-	t.set_stylebox("panel", "PanelContainer", _box(C_PANEL, 20, 14))
-	t.set_stylebox("normal", "Button", _box(C_GREEN, 14, 14))
-	t.set_stylebox("hover", "Button", _box(C_GREEN.lightened(0.1), 14, 14))
-	t.set_stylebox("pressed", "Button", _box(C_GREEN.darkened(0.2), 14, 14))
-	t.set_stylebox("disabled", "Button", _box(Color(0.3, 0.33, 0.4), 14, 14))
+	var panel := _box(C_PANEL, 22, 14)
+	panel.border_color = Color(1, 1, 1, 0.08)
+	panel.set_border_width_all(2)
+	panel.shadow_color = Color(0, 0, 0, 0.35)
+	panel.shadow_size = 10
+	panel.shadow_offset = Vector2(0, 4)
+	t.set_stylebox("panel", "PanelContainer", panel)
+	t.set_stylebox("normal", "Button", _bbox(C_GREEN))
+	t.set_stylebox("hover", "Button", _bbox(C_GREEN.lightened(0.1)))
+	t.set_stylebox("pressed", "Button", _bbox(C_GREEN.darkened(0.1), 14, 14, true))
+	t.set_stylebox("disabled", "Button", _bbox(Color(0.3, 0.33, 0.4)))
 	t.set_stylebox("focus", "Button", StyleBoxEmpty.new())
 	t.set_color("font_color", "Button", Color.WHITE)
 	t.set_color("font_disabled_color", "Button", Color(0.75, 0.75, 0.8))
@@ -202,9 +228,20 @@ func _build_status_card() -> void:
 	moment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	top.add_child(clock_label)
 	fps_label = _label("", 14, C_MUTED)
-	fps_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	top.add_child(fps_label)
+	var mid := HBoxContainer.new()
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mid.alignment = BoxContainer.ALIGNMENT_CENTER
+	mid.add_theme_constant_override("separation", 6)
+	stars = Control.new()
+	stars.custom_minimum_size = Vector2(96, 20)
+	stars.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stars.draw.connect(_draw_stars)
+	mid.add_child(stars)
+	rating_label = _label("", 17, C_GOLD)
+	mid.add_child(rating_label)
+	mid.add_child(fps_label)
+	top.add_child(mid)
 	top.add_child(moment_label)
 	v.add_child(top)
 	status_label = _label("", 19)
@@ -230,9 +267,9 @@ func _build_bottom_bar() -> void:
 		b.clip_text = true
 		b.custom_minimum_size = Vector2(60, 0)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.add_theme_stylebox_override("normal", _box(Color("2a4a8a"), 14, 6))
-		b.add_theme_stylebox_override("hover", _box(Color("3560a8"), 14, 6))
-		b.add_theme_stylebox_override("pressed", _box(Color("1d3566"), 14, 6))
+		b.add_theme_stylebox_override("normal", _bbox(Color("2a4a8a"), 14, 6))
+		b.add_theme_stylebox_override("hover", _bbox(Color("3560a8"), 14, 6))
+		b.add_theme_stylebox_override("pressed", _bbox(Color("1d3566"), 14, 6, true))
 		row.add_child(b)
 		if tab[1] == "missions":
 			missions_btn = b
@@ -252,6 +289,8 @@ func _update_hud() -> void:
 		Game.occupied, Game.spots(), Game.price_str(Game.price()), int(round(Game.enter_chance() * 100.0))]
 	clock_label.text = Game.clock_str()
 	fps_label.text = "%d FPS" % Engine.get_frames_per_second()
+	rating_label.text = Game.rating_str()
+	stars.queue_redraw()
 	moment_label.text = Game.moment_str()
 	city_label.text = "%s  |  %s moradores  |  %s trabalhando" % [
 		Game.phase_name(), Game.int_str(Game.population()), Game.int_str(Game.employed())]
@@ -279,7 +318,7 @@ func _build_window() -> void:
 	head.add_child(window_title)
 	var close := _button("X", close_window, 24)
 	close.custom_minimum_size = Vector2(56, 48)
-	close.add_theme_stylebox_override("normal", _box(Color("8a2a3a"), 12, 8))
+	close.add_theme_stylebox_override("normal", _bbox(Color("8a2a3a"), 12, 8))
 	head.add_child(close)
 	v.add_child(head)
 	var scroll := ScrollContainer.new()
@@ -320,14 +359,14 @@ func _build_side_buttons() -> void:
 	side_buttons = box
 	var p := _button("P", _on_focus_lot, 34)
 	p.custom_minimum_size = Vector2(84, 76)
-	p.add_theme_stylebox_override("normal", _box(Color("1d4fb8"), 38, 8))
-	p.add_theme_stylebox_override("hover", _box(Color("2a62d6"), 38, 8))
-	p.add_theme_stylebox_override("pressed", _box(Color("163c8c"), 38, 8))
+	p.add_theme_stylebox_override("normal", _bbox(Color("1d4fb8"), 38, 8))
+	p.add_theme_stylebox_override("hover", _bbox(Color("2a62d6"), 38, 8))
+	p.add_theme_stylebox_override("pressed", _bbox(Color("163c8c"), 38, 8, true))
 	box.add_child(p)
 	var m := _button("Mapa", _on_show_map, 20)
 	m.custom_minimum_size = Vector2(84, 60)
-	m.add_theme_stylebox_override("normal", _box(Color("2a4a8a"), 18, 6))
-	m.add_theme_stylebox_override("hover", _box(Color("3560a8"), 18, 6))
+	m.add_theme_stylebox_override("normal", _bbox(Color("2a4a8a"), 18, 6))
+	m.add_theme_stylebox_override("hover", _bbox(Color("3560a8"), 18, 6))
 	box.add_child(m)
 
 
@@ -386,6 +425,8 @@ func _rebuild_window() -> void:
 		"offline":
 			window_title.text = "Bem-vindo de volta!"
 			_build_offline()
+		"customer":
+			_build_customer()
 	_let_scroll(window_body)
 
 
@@ -612,7 +653,7 @@ func _build_business() -> void:
 		col.add_child(hire)
 		var fire := _button("Demitir", func(): _after_action(Game.fire(key)), 15)
 		fire.custom_minimum_size = Vector2(150, 36)
-		fire.add_theme_stylebox_override("normal", _box(Color("5a2a35"), 10, 6))
+		fire.add_theme_stylebox_override("normal", _bbox(Color("5a2a35"), 10, 6))
 		fire.visible = Game.staff_count(key) > 0
 		col.add_child(fire)
 		row.add_child(col)
@@ -660,7 +701,7 @@ func _build_research() -> void:
 	a_row.add_child(a_time)
 	var rush := _button("", func(): _after_action(Game.rush_research()), 18)
 	rush.custom_minimum_size = Vector2(190, 50)
-	rush.add_theme_stylebox_override("normal", _box(Color("8a3fc0"), 14, 10))
+	rush.add_theme_stylebox_override("normal", _bbox(Color("8a3fc0"), 14, 10))
 	a_row.add_child(rush)
 	av.add_child(a_row)
 	var was_active := [Game.research_active()]
@@ -743,7 +784,7 @@ func _build_city() -> void:
 	row.add_child(bl)
 	var bb := _button("%d gemas" % Game.BOOST_GEMS, func(): _after_action(Game.buy_boost()), 20)
 	bb.custom_minimum_size = Vector2(170, 64)
-	bb.add_theme_stylebox_override("normal", _box(Color("8a3fc0"), 14, 14))
+	bb.add_theme_stylebox_override("normal", _bbox(Color("8a3fc0"), 14, 14))
 	row.add_child(bb)
 	refreshers.append(func(): bb.disabled = Game.gems < Game.BOOST_GEMS)
 
@@ -833,6 +874,104 @@ func _build_expansion() -> void:
 			row.add_child(_label("Bloqueado", 20, C_MUTED))
 
 
+func _draw_stars() -> void:
+	var r := 8.5
+	for i in 5:
+		var c := Vector2(10 + i * 19, 10)
+		var fill := clampf(Game.rating - i, 0.0, 1.0)
+		_star(c, r, Color(1, 1, 1, 0.18))
+		if fill > 0.0:
+			_star(c, r * (0.45 + 0.55 * fill), C_GOLD)
+
+
+func _star(c: Vector2, r: float, col: Color) -> void:
+	var pts := PackedVector2Array()
+	for k in 10:
+		var a := -PI / 2.0 + k * PI / 5.0
+		var rr := r if k % 2 == 0 else r * 0.45
+		pts.append(c + Vector2(cos(a), sin(a)) * rr)
+	stars.draw_colored_polygon(pts, col)
+
+
+func show_customer(car) -> void:
+	customer = car
+	current_tab = "customer"
+	_rebuild_window()
+	window.visible = true
+
+
+func _build_customer() -> void:
+	var car = customer
+	if car == null or not is_instance_valid(car):
+		window_title.text = "Cliente"
+		_hint("Este cliente já foi embora.")
+		return
+	window_title.text = car.cname
+	var card := _card()
+	window_body.add_child(card)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	card.add_child(v)
+	var kinds := ["Sedã", "Picape", "Ônibus", "Hatch", "SUV", "Van", "Táxi"]
+	v.add_child(_label("%s  |  %s" % [car.job, kinds[clampi(car.kind, 0, kinds.size() - 1)]], 20, C_MUTED))
+	var status := _label("", 22)
+	v.add_child(status)
+	var info := _label("", 19, C_MUTED)
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(info)
+	var spent := _label("", 22, C_GREEN_TEXT)
+	v.add_child(spent)
+	var mood := _label("", 19)
+	mood.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(mood)
+	var refresh := func():
+		if not is_instance_valid(car):
+			status.text = "Foi embora."
+			return
+		status.text = car.status
+		if car.angry:
+			info.text = "Chegou, viu o estacionamento lotado e foi embora. Isso derruba a sua avaliação!"
+			spent.text = "Gastou: R$ 0"
+			mood.text = "Humor: irritado"
+			mood.add_theme_color_override("font_color", Color("ff6b6b"))
+			return
+		info.text = "%s  |  Vai ficar %s h pagando %s/h" % [
+			"Veio trabalhar" if car.worker else "Veio às compras/lazer", ("%.1f" % car.hours).replace(".", ","), Game.price_str(Game.price())]
+		spent.text = "Gastou até agora: %s" % Game.money_str(car.spent)
+		var ratio := Game.price() / Game.fair_price()
+		if ratio > 1.3:
+			mood.text = "Humor: achou caro"
+			mood.add_theme_color_override("font_color", Color("ffb347"))
+		elif Game.rating >= 4.0:
+			mood.text = "Humor: muito satisfeito"
+			mood.add_theme_color_override("font_color", C_GREEN_TEXT)
+		else:
+			mood.text = "Humor: satisfeito"
+			mood.add_theme_color_override("font_color", Color.WHITE)
+	refresh.call()
+	refreshers.append(refresh)
+
+
+func _build_achievements() -> void:
+	var done := Game.achievements.size()
+	var head := _label("Conquistas  %d/%d" % [done, Game.ACHIEVEMENTS.size()], 24, C_GOLD)
+	window_body.add_child(head)
+	for a in Game.ACHIEVEMENTS:
+		var got: bool = Game.achievements.has(a.id)
+		var card := _card()
+		if got:
+			card.add_theme_stylebox_override("panel", _box(Color("1f5a3a"), 16, 12))
+		window_body.add_child(card)
+		var row := HBoxContainer.new()
+		card.add_child(row)
+		var text := VBoxContainer.new()
+		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		text.add_child(_label(a.name, 20, Color.WHITE if got else C_MUTED))
+		text.add_child(_label(a.desc, 16, C_MUTED))
+		row.add_child(text)
+		row.add_child(_label(("Feita! " if got else "") + "+%d gemas" % int(a.gems), 17, C_GEM))
+
+
 func _build_missions() -> void:
 	var shown := 0
 	for i in Game.MISSIONS.size():
@@ -867,11 +1006,12 @@ func _build_missions() -> void:
 			break
 	if shown == 0:
 		_hint("Todas as missões concluídas! Você é um magnata dos estacionamentos.")
+	_build_achievements()
 	var stats := _label("Carros atendidos: %s   Faturamento total: %s" % [Game.int_str(Game.total_cars), Game.money_str(Game.total_earned)], 17, C_MUTED)
 	stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	window_body.add_child(stats)
 	var reset := _button("Recomeçar do zero", _confirm_reset, 18)
-	reset.add_theme_stylebox_override("normal", _box(Color("5a2a35"), 12, 10))
+	reset.add_theme_stylebox_override("normal", _bbox(Color("5a2a35"), 12, 10))
 	window_body.add_child(reset)
 
 
@@ -882,7 +1022,7 @@ func _confirm_reset() -> void:
 		c.queue_free()
 	_hint("Todo o progresso será apagado. Tem certeza?")
 	var yes := _button("Sim, apagar tudo", _do_reset, 22)
-	yes.add_theme_stylebox_override("normal", _box(Color("a02a3a"), 12, 12))
+	yes.add_theme_stylebox_override("normal", _bbox(Color("a02a3a"), 12, 12))
 	window_body.add_child(yes)
 	window_body.add_child(_button("Cancelar", func(): _rebuild_window(), 22))
 
@@ -905,7 +1045,7 @@ func _build_offline() -> void:
 	window_body.add_child(amount)
 	window_body.add_child(_button("Coletar", _collect_offline.bind(false), 26))
 	var dbl := _button("Coletar 2x (10 gemas)", _collect_offline.bind(true), 22)
-	dbl.add_theme_stylebox_override("normal", _box(Color("8a3fc0"), 14, 14))
+	dbl.add_theme_stylebox_override("normal", _bbox(Color("8a3fc0"), 14, 14))
 	dbl.disabled = Game.gems < 10
 	window_body.add_child(dbl)
 

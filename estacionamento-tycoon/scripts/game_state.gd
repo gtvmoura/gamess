@@ -37,6 +37,24 @@ const RESEARCH := {
 }
 const RESEARCH_GROWTH := 2.1
 
+const ACHIEVEMENTS := [
+	{"id": "first", "name": "Primeiro Cliente", "desc": "Estacione o primeiro carro.", "gems": 5},
+	{"id": "cars100", "name": "Movimento Bom", "desc": "Atenda 100 carros.", "gems": 10},
+	{"id": "cars1k", "name": "Estacionamento Famoso", "desc": "Atenda 1.000 carros.", "gems": 20},
+	{"id": "cars10k", "name": "Rei das Vagas", "desc": "Atenda 10.000 carros.", "gems": 50},
+	{"id": "rich1m", "name": "Milionário", "desc": "Fature R$ 1 milhão no total.", "gems": 20},
+	{"id": "rich1b", "name": "Bilionário", "desc": "Fature R$ 1 bilhão no total.", "gems": 80},
+	{"id": "stars", "name": "Cinco Estrelas", "desc": "Chegue a 4,8 estrelas de avaliação.", "gems": 30},
+	{"id": "full", "name": "Casa Cheia", "desc": "Lote 50 vagas ou mais.", "gems": 15},
+	{"id": "services", "name": "Centro Automotivo", "desc": "Construa os 4 serviços.", "gems": 25},
+	{"id": "team", "name": "Grande Equipe", "desc": "Tenha 10 funcionários.", "gems": 20},
+	{"id": "science", "name": "Inovação", "desc": "Conclua 10 pesquisas.", "gems": 25},
+	{"id": "premium", "name": "Estacionamento Premium", "desc": "Cobre R$ 50/h ou mais com 30% de entrada.", "gems": 25},
+	{"id": "growth", "name": "Cidade em Crescimento", "desc": "Alcance 6.000 moradores.", "gems": 15},
+	{"id": "metro", "name": "Metrópole", "desc": "Alcance 60.000 moradores.", "gems": 50},
+	{"id": "districts", "name": "Dono da Cidade", "desc": "Desbloqueie todos os bairros.", "gems": 100},
+]
+
 ## Serviços extras: cada cliente que estaciona pode usar (chance) e pagar (preço).
 const SERVICES := {
 	"wash": {"name": "Lava-Rápido", "desc": "Lavagem enquanto o carro fica estacionado.", "build": 5000.0, "up": 4000.0, "growth": 1.9, "max": 10, "chance": 0.12, "price": 25.0, "staff": "washer"},
@@ -125,6 +143,10 @@ var research_key := ""
 var research_end := 0.0
 var services := {}
 var staff := {}
+## Avaliação dos clientes (1 a 5 estrelas) e clientes perdidos recentes (lotação).
+var rating: float = 3.5
+var recent_lost: float = 0.0
+var achievements: Array = []
 
 ## Vagas ocupadas agora (atualizado pela cena do estacionamento).
 var occupied: int = 0
@@ -133,6 +155,7 @@ var offline_pending: float = 0.0
 var offline_seconds: float = 0.0
 
 var _save_timer := 0.0
+var _ach_timer := 0.0
 
 
 func _ready() -> void:
@@ -230,6 +253,12 @@ func settle_population() -> void:
 
 func _simulate(delta: float) -> void:
 	check_research(Time.get_unix_time_from_system())
+	recent_lost *= exp(-delta / 60.0)
+	rating = move_toward(rating, target_rating(), delta * 0.02)
+	_ach_timer += delta
+	if _ach_timer >= 1.0:
+		_ach_timer = 0.0
+		check_achievements()
 	if salary_per_hour() > 0.0:
 		money = maxf(0.0, money - salary_per_hour() / 3600.0 * delta)
 	var target := target_population()
@@ -353,7 +382,7 @@ func enter_chance() -> float:
 
 
 func enter_chance_at(p: float) -> float:
-	var base := (0.35 + 0.05 * float(lvl.attract)) * (1.0 + 0.08 * rlvl("marketing")) * (1.0 + 0.03 * staff_count("cleaner"))
+	var base := (0.35 + 0.05 * float(lvl.attract)) * (1.0 + 0.08 * rlvl("marketing")) * (1.0 + 0.03 * staff_count("cleaner")) * rating_mult()
 	return clampf(base * price_acceptance(p), 0.005, 0.95)
 
 
@@ -474,7 +503,7 @@ func service_chance(key: String) -> float:
 ## Preço do serviço acompanha a riqueza da cidade (preço justo do estacionamento).
 func service_price(key: String) -> float:
 	var l := maxi(1, service_lvl(key))
-	return float(SERVICES[key].price) * (1.0 + 0.3 * (l - 1)) * (fair_price() / 8.0)
+	return float(SERVICES[key].price) * (1.0 + 0.3 * (l - 1)) * sqrt(fair_price() / 8.0)
 
 
 ## Quanto, em média, cada cliente gasta em serviços.
@@ -497,6 +526,92 @@ func roll_services(r: RandomNumberGenerator) -> Array:
 	if not out.is_empty():
 		changed.emit()
 	return out
+
+
+# ---------------------------------------------------------------- Avaliação
+
+## Avaliação para onde a nota caminha, conforme a experiência dos clientes.
+func target_rating() -> float:
+	var r := 3.0
+	r += 0.12 * staff_count("cleaner") + 0.1 * staff_count("guard")
+	r += 0.03 * float(lvl.get("comfort", 0)) + 0.02 * float(lvl.attract)
+	var built := 0
+	for k in SERVICES.keys():
+		if service_lvl(k) > 0:
+			built += 1
+	r += 0.12 * built
+	var ratio := price() / fair_price()
+	if ratio > 1.0:
+		r -= minf(1.5, (ratio - 1.0) * 1.2)
+	else:
+		r += (1.0 - ratio) * 0.5
+	# lotação: clientes que voltaram para trás nos últimos minutos
+	r -= minf(1.5, recent_lost / 15.0)
+	return clampf(r, 1.0, 5.0)
+
+
+## Efeito da avaliação na chance de entrada (3 estrelas = normal).
+func rating_mult() -> float:
+	return 0.64 + 0.12 * rating
+
+
+func note_lost_customer() -> void:
+	lost_customers += 1
+	recent_lost += 1.0
+
+
+func rating_str() -> String:
+	return ("%.1f" % rating).replace(".", ",")
+
+
+# ---------------------------------------------------------------- Conquistas
+
+func achievement_done(id: String) -> bool:
+	match id:
+		"first":
+			return total_cars >= 1
+		"cars100":
+			return total_cars >= 100
+		"cars1k":
+			return total_cars >= 1000
+		"cars10k":
+			return total_cars >= 10000
+		"rich1m":
+			return total_earned >= 1e6
+		"rich1b":
+			return total_earned >= 1e9
+		"stars":
+			return rating >= 4.8
+		"full":
+			return spots() >= 50 and occupied >= spots()
+		"services":
+			for k in SERVICES.keys():
+				if service_lvl(k) <= 0:
+					return false
+			return true
+		"team":
+			return staff_total() >= 10
+		"science":
+			return research_total() >= 10
+		"premium":
+			return price() >= 50.0 and enter_chance() >= 0.3
+		"growth":
+			return pop >= 6000.0
+		"metro":
+			return pop >= 60000.0
+		"districts":
+			return districts_unlocked >= DISTRICTS.size()
+	return false
+
+
+func check_achievements() -> void:
+	for a in ACHIEVEMENTS:
+		var id: String = a.id
+		if not achievements.has(id) and achievement_done(id):
+			achievements.append(id)
+			gems += int(a.gems)
+			notify.emit("Conquista: %s! +%d gemas" % [a.name, int(a.gems)])
+			changed.emit()
 
 
 func wage_level() -> float:
@@ -838,6 +953,8 @@ func to_dict() -> Dictionary:
 		"research_end": research_end,
 		"services": services,
 		"staff": staff,
+		"rating": rating,
+		"achievements": achievements,
 		"pop": pop,
 		"day": day,
 		"hour": hour,
@@ -878,6 +995,10 @@ func from_dict(d: Dictionary) -> void:
 	for k in sv.keys():
 		if SERVICES.has(String(k)):
 			services[String(k)] = int(sv[k])
+	rating = float(d.get("rating", 3.5))
+	achievements = []
+	for a in d.get("achievements", []):
+		achievements.append(String(a))
 	staff = {}
 	var st: Dictionary = d.get("staff", {})
 	for k in st.keys():
