@@ -192,7 +192,7 @@ static func _curve(curve: Array, h: float) -> float:
 	var mean := total / curve.size()
 	var i := int(floor(h)) % 24
 	var j := (i + 1) % 24
-	var t := h - floor(h)
+	var t := h - floorf(h)
 	return lerpf(float(curve[i]), float(curve[j]), t) / mean
 
 
