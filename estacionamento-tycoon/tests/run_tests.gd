@@ -148,24 +148,31 @@ func _initialize() -> void:
 	check(g.buy_lot_floor(1) and g.lot_capacity(1) > 40, "bairro vira edifício-garagem")
 	check(not g.buy_lot(5), "não constrói em bairro bloqueado")
 
-	# Prestígio
-	g.total_earned = 50000000.0
-	var pg: int = g.prestige_gain()
+	# Prestígio (instância separada para não apagar o resto dos testes)
+	var p3 = GameScript.new()
+	p3.total_earned = 50000000.0
+	var pg: int = p3.prestige_gain()
 	check(pg == 5, "R$ 50 mi faturados = 5 pontos de prestígio (%d)" % pg)
-	var gems_p: int = g.gems
-	check(g.do_prestige(), "vende o império")
-	check(g.prestige_points == 5 and g.prestige_count == 1, "ganha os pontos")
-	check(g.spots() == 10 and g.lots.is_empty() and int(g.lvl.garage) == 0, "cidade recomeça do zero")
-	check(g.gems >= gems_p, "gemas ficam")
-	var inc_p: float = g.income_mult()
-	check(g.buy_prestige("investors"), "compra upgrade de prestígio")
-	check(g.income_mult() > inc_p, "investidores aumentam a receita")
-	check(not g.can_buy_prestige("remote"), "nível 2 da árvore fechado no começo")
-	g.prestige_points = 1000
-	while g.prestige_spent() < 8:
-		g.buy_prestige("brand")
-	check(g.can_buy_prestige("remote"), "nível 2 abre depois de investir 8 pontos")
-	check(not g.do_prestige(), "não vende sem faturamento")
+	var gems_p: int = p3.gems
+	check(p3.do_prestige(), "vende o império")
+	check(p3.prestige_points == 5 and p3.prestige_count == 1, "ganha os pontos")
+	check(p3.spots() == 10 and p3.lots.is_empty() and int(p3.lvl.garage) == 0, "cidade recomeça do zero")
+	check(p3.gems >= gems_p, "gemas ficam")
+	var inc_p: float = p3.income_mult()
+	check(p3.buy_prestige("investors"), "compra upgrade de prestígio")
+	check(p3.income_mult() > inc_p, "investidores aumentam a receita")
+	check(not p3.can_buy_prestige("remote"), "nível 2 da árvore fechado no começo")
+	p3.prestige_points = 1000
+	while p3.prestige_spent() < 8:
+		p3.buy_prestige("brand")
+	check(p3.can_buy_prestige("remote"), "nível 2 abre depois de investir 8 pontos")
+	check(not p3.do_prestige(), "não vende sem faturamento")
+
+	var p3b = GameScript.new()
+	p3b.from_dict(JSON.parse_string(JSON.stringify(p3.to_dict())))
+	check(p3b.plvl("investors") == 1 and p3b.prestige_count == 1, "save mantém prestígio")
+	p3.free()
+	p3b.free()
 
 	# Moradores x empregos
 	g.lvl.city = 10
@@ -235,7 +242,6 @@ func _initialize() -> void:
 	check(g2.day == g.day, "save mantém o dia")
 	check(g2.rlvl("digital") == 1, "save mantém pesquisas")
 	check(g2.achievements.has("first"), "save mantém conquistas")
-	check(g2.plvl("investors") == 1 and g2.prestige_count == 1, "save mantém prestígio")
 	check(g2.service_lvl("wash") == 1 and g2.staff_count("washer") == 1, "save mantém serviços e funcionários")
 	check(is_equal_approx(g2.price(), g.price()), "save mantém o preço")
 	check(g2.districts_unlocked == g.districts_unlocked, "save mantém bairros")
