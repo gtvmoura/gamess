@@ -26,6 +26,7 @@ var hours := 0.0
 var spent := 0.0
 var status := ""
 var angry := false
+var frames := {}   # sprites da Kenney por direção: "px","py","nx","ny" -> [tex, rect]
 var kind := 0  # 0 carro, 1 caminhonete, 2 ônibus
 
 
@@ -51,6 +52,8 @@ func setup(rng: RandomNumberGenerator, start: Vector2) -> void:
 		kind = 5
 	else:
 		kind = 6
+	if rng.randf() < 0.06:
+		kind = 7  # moto
 	if kind == 2:
 		body_color = Color("f2c230") if rng.randf() < 0.5 else Color("3a8fd9")
 	elif kind == 6:
@@ -94,6 +97,20 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
+	if not frames.is_empty():
+		var key := "px"
+		if absf(dir.x) >= absf(dir.y):
+			key = "px" if dir.x >= 0.0 else "nx"
+		else:
+			key = "py" if dir.y >= 0.0 else "ny"
+		var f: Array = frames[key]
+		var sh := PackedVector2Array()
+		for i in 12:
+			var a := TAU * i / 12.0
+			sh.append(Vector2(cos(a) * 15.0 + 3.0, sin(a) * 6.0 + 2.0))
+		draw_colored_polygon(sh, Color(0, 0, 0, 0.25))
+		draw_texture_rect(f[0], f[1], false)
+		return
 	var b = Batch.new()
 	_draw_body(b)
 	b.flush(get_canvas_item())

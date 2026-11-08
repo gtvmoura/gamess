@@ -16,6 +16,8 @@ var color2 := Color.WHITE
 var seed_value := 0
 var lit_chance := 0.05
 var size_f := 0.0
+var tex: Texture2D = null   # para kind "sprite"
+var tex_rect := Rect2()     # retângulo em coordenadas do mundo
 var _t := 0.0
 var open := 0.0  # cancela: 0 fechada, 1 aberta
 var _c = null   # alvo do desenho (o próprio nó ou um Batch)
@@ -39,6 +41,10 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
+	if kind == "sprite":
+		if tex:
+			draw_texture_rect(tex, Rect2(tex_rect.position - position, tex_rect.size), false)
+		return
 	if kind == "pin":
 		draw_into(self, position)
 		return

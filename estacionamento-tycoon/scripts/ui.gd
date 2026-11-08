@@ -934,7 +934,7 @@ func _build_customer() -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 6)
 	card.add_child(v)
-	var kinds := ["Sedã", "Picape", "Ônibus", "Hatch", "SUV", "Van", "Táxi"]
+	var kinds := ["Sedã", "Picape", "Ônibus", "Hatch", "SUV", "Van", "Táxi", "Moto"]
 	v.add_child(_label("%s  |  %s" % [car.job, kinds[clampi(car.kind, 0, kinds.size() - 1)]], 20, C_MUTED))
 	var status := _label("", 22)
 	v.add_child(status)

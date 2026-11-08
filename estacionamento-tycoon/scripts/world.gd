@@ -220,19 +220,76 @@ func _prop(kind: String, x: float, y: float, w: float = 0.0, d: float = 0.0):
 	return p
 
 
-## Junta todos os objetos coletados num único nó (um comando de desenho).
+## Junta os objetos coletados num único nó, na ordem de trás para frente,
+## agrupando polígonos e intercalando os sprites.
 func _flush_block(front: Vector2) -> void:
 	var node = BlockMesh.new()
 	node.position = Iso.pg(front)
 	var b = Batch.new()
 	_collect.sort_custom(func(a, c): return a.position.y < c.position.y)
 	for p in _collect:
-		p.draw_into(b, node.position)
+		if p.kind == "sprite":
+			Iso.shadow(b, node.position, p.x0, p.y0, p.w, p.d, 40.0)
+			node.ops.append(["b", b])
+			b = Batch.new()
+			node.ops.append(["t", p.tex, Rect2(p.tex_rect.position - node.position, p.tex_rect.size)])
+		else:
+			p.draw_into(b, node.position)
 		p.free()
 	_collect = null
-	node.batch = b
+	if not b.is_empty():
+		node.ops.append(["b", b])
 	objects.add_child(node)
 	_static_nodes.append(node)
+
+
+# ---------------------------------------------------------------- Sprites (Kenney, CC0)
+
+var _sprite_meta := {}
+var _tex_cache := {}
+
+
+func _sprite(key: String):
+	if _sprite_meta.is_empty():
+		var txt := FileAccess.get_file_as_string("res://assets/sprites/sprites.json")
+		var d = JSON.parse_string(txt)
+		if typeof(d) == TYPE_DICTIONARY:
+			_sprite_meta = d
+	if not _sprite_meta.has(key):
+		return null
+	if not _tex_cache.has(key):
+		_tex_cache[key] = load("res://assets/sprites/%s.png" % key)
+	return [_tex_cache[key], _sprite_meta[key]]
+
+
+## Prédio da Kenney ocupando a área (x, y, w, w); escala o sprite para caber.
+func _kenney_building(model: String, rot: int, x: float, y: float, w: float):
+	var spr = _sprite("%s_r%d" % [model, rot])
+	if spr == null:
+		return null
+	var m: Dictionary = spr[1]
+	var s := w * 0.5          # sprites foram feitos em 2x (1 casa = 128 px)
+	var p = _prop("sprite", x, y, w, w)
+	p.tex = spr[0]
+	var anchor := Vector2(float(m.ax), float(m.ay)) * s
+	p.tex_rect = Rect2(Iso.p(x + w / 2.0, y + w / 2.0) - anchor, Vector2(float(m.w), float(m.h)) * s)
+	return p
+
+
+## Quadros de um veículo da Kenney nas 4 direções da grade.
+func vehicle_frames(model: String, length_tiles: float) -> Dictionary:
+	var out := {}
+	var dirs := {"px": 90, "py": 0, "nx": 270, "ny": 180}
+	for k in dirs.keys():
+		var spr = _sprite("%s_r%d" % [model, dirs[k]])
+		if spr == null:
+			return {}
+		var m: Dictionary = spr[1]
+		var size: Array = m.size
+		var real_len := maxf(float(size[0]), float(size[2]))
+		var s := length_tiles / real_len * 0.5
+		out[k] = [spr[0], Rect2(-Vector2(float(m.ax), float(m.ay)) * s, Vector2(float(m.w), float(m.h)) * s)]
+	return out
 
 
 func _tree(x: float, y: float, r: RandomNumberGenerator, palm: bool) -> void:
@@ -303,6 +360,14 @@ func _build_city(br: RandomNumberGenerator) -> void:
 					tower = false
 					floors = mini(floors, 4)
 				var bw := 2.4 if tower else 2.7
+				# prédios pequenos/médios: modelos da Kenney (variedade), o resto procedural
+				if not tower and floors <= 7 and r2 < 0.7:
+					var model := "building-small-a" if floors <= 2 else ("building-small-b" if floors <= 4 else "building-small-c")
+					if floors <= 2 and br.randf() < 0.5:
+						model = "building-small-d"
+					var kb = _kenney_building(model, br.randi_range(0, 3) * 90, px + 0.1, py + 0.1, 2.7)
+					if kb != null:
+						continue
 				var bld = _prop("tower" if tower else "building", px + (2.9 - bw) / 2.0, py + (2.9 - bw) / 2.0, bw, bw)
 				bld.floors = maxi(2, floors)
 				var pal: Array = TOWER_COLORS if tower else BUILDING_COLORS
@@ -633,10 +698,21 @@ func _free_spot() -> int:
 	return free[rng.randi_range(0, mini(free.size() - 1, 5))]
 
 
+const VEHICLE_SPRITES := {1: ["vehicle-truck-red", "vehicle-truck-yellow", "vehicle-truck-green"], 4: ["vehicle-truck-purple"], 7: ["vehicle-motorcycle"]}
+var _frames_cache := {}
+
+
 func _new_car(start: Vector2):
 	var car = CarScript.new()
 	objects.add_child(car)
 	car.setup(rng, start)
+	if VEHICLE_SPRITES.has(car.kind):
+		var list: Array = VEHICLE_SPRITES[car.kind]
+		var model: String = list[rng.randi_range(0, list.size() - 1)]
+		if not _frames_cache.has(model):
+			_frames_cache[model] = vehicle_frames(model, 0.38 if car.kind == 7 else 0.56)
+		car.frames = _frames_cache[model]
+		car.queue_redraw()
 	car.modulate.a = 0.0
 	car.create_tween().tween_property(car, "modulate:a", 1.0, 0.4)
 	return car
