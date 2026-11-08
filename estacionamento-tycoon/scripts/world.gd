@@ -575,6 +575,7 @@ func _angry_customer() -> void:
 
 func _angry_text(car) -> void:
 	if is_instance_valid(car):
+		Sfx.play("skid", -14.0, 1.5)
 		_floating_text("Lotado!", Iso.pg(car.grid, 30.0), Color("ff5a5a"), true)
 
 
@@ -791,6 +792,8 @@ func _car_leave(car) -> void:
 	var paid := Game.car_paid(Game.price() * hours)
 	car.spent += paid
 	car.status = "Indo embora"
+	if camera.zoom.x >= 0.5:
+		Sfx.play("coin", -16.0, 0.35, 0.12)
 	_floating_text("+" + Game.money_str(paid), Iso.pg(car.grid, 26.0))
 	var extra := Game.roll_services(rng)
 	for i in extra.size():

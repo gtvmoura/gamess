@@ -38,6 +38,7 @@ var fps_label: Label
 var stars: Control
 var rating_label: Label
 var customer = null
+var sound_btn: Button
 var price_slider: HSlider
 var window_scroll: ScrollContainer
 
@@ -155,6 +156,7 @@ func _button(text: String, cb: Callable, size: int = 22) -> Button:
 	b.text = text
 	b.add_theme_font_size_override("font_size", size)
 	b.pressed.connect(cb)
+	b.pressed.connect(_click_sound)
 	return b
 
 
@@ -368,6 +370,20 @@ func _build_side_buttons() -> void:
 	m.add_theme_stylebox_override("normal", _bbox(Color("2a4a8a"), 18, 6))
 	m.add_theme_stylebox_override("hover", _bbox(Color("3560a8"), 18, 6))
 	box.add_child(m)
+	sound_btn = _button("", _toggle_sound, 16)
+	sound_btn.custom_minimum_size = Vector2(84, 48)
+	sound_btn.add_theme_stylebox_override("normal", _bbox(Color("2a4a8a"), 18, 6))
+	box.add_child(sound_btn)
+	_update_sound_btn()
+
+
+func _toggle_sound() -> void:
+	Sfx.toggle()
+	_update_sound_btn()
+
+
+func _update_sound_btn() -> void:
+	sound_btn.text = "Som: sim" if Sfx.enabled else "Som: não"
 
 
 func _on_focus_lot() -> void:
@@ -441,7 +457,13 @@ func _let_scroll(node: Node) -> void:
 		_let_scroll(c)
 
 
+func _click_sound() -> void:
+	Sfx.play("click", -12.0, 0.05, 0.03)
+
+
 func _after_action(ok: bool) -> void:
+	if ok:
+		Sfx.play("buy", -4.0, 0.05)
 	if ok:
 		_rebuild_window()
 
