@@ -1,0 +1,46 @@
+name: Estacionamento Tycoon - Prints
+
+on:
+  push:
+    branches: [main]
+    paths: ["estacionamento-tycoon/**", ".github/workflows/estacionamento-tycoon-prints.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prints:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar Godot e tela virtual
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libgl1-mesa-dri libglu1-mesa > /dev/null
+          curl -sSL -o godot.zip https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip
+          unzip -q godot.zip && mv Godot_v4.3-stable_linux.x86_64 godot && rm godot.zip
+      - name: Importar projeto
+        run: timeout 300 ./godot --headless --import --path estacionamento-tycoon || true
+      - name: Tirar prints
+        run: |
+          mkdir -p prints
+          timeout 600 xvfb-run -a -s "-screen 0 1280x1400x24" ./godot --path estacionamento-tycoon \
+            --rendering-driver opengl3 --rendering-method gl_compatibility \
+            --resolution 720x1280 --fixed-fps 30 --audio-driver Dummy \
+            -- --screenshots="$PWD/prints" 2>&1 | tee prints.log
+          ls -la prints
+          test -f prints/05_metropole.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prints
+          path: prints/
+      - name: Publicar prints na branch "prints"
+        run: |
+          cd prints
+          git init -q -b prints
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "Prints do commit ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" prints
