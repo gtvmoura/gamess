@@ -31,7 +31,7 @@ func _world():
 
 func _tabs(prefix: String) -> void:
 	var ui = _ui()
-	for tab in ["upgrades", "city", "research", "expansion", "missions"]:
+	for tab in ["upgrades", "business", "city", "research", "expansion", "missions"]:
 		ui.open_tab(tab)
 		await _wait(1.0)
 		await _shot("%s_%s" % [prefix, tab])
@@ -62,6 +62,8 @@ func _run() -> void:
 	Game.lvl = {"spots": 6, "attract": 5, "comfort": 4, "fleet": 5, "city": 8, "jobs": 8}
 	Game.hour = 12.5
 	Game.price_value = 14.0
+	Game.services = {"wash": 2, "cafe": 1}
+	Game.staff = {"washer": 1, "valet": 2, "cleaner": 1}
 	Game.research_lvl = {"digital": 2, "marketing": 1}
 	Game.research_key = "valet"
 	Game.research_end = Time.get_unix_time_from_system() + 40.0
@@ -80,6 +82,8 @@ func _run() -> void:
 	Game.lvl = {"spots": 18, "attract": 14, "comfort": 12, "fleet": 12, "city": 16, "jobs": 16}
 	Game.hour = 17.6
 	Game.price_value = 26.0
+	Game.services = {"wash": 5, "cafe": 4, "ev": 3, "tire": 2}
+	Game.staff = {"washer": 2, "valet": 4, "cleaner": 3, "guard": 2, "cashier": 2, "mechanic": 1}
 	Game.research_key = ""
 	Game.districts_unlocked = 6
 	Game.money = 48700000.0
@@ -91,6 +95,11 @@ func _run() -> void:
 	await _wait(16.0)
 	await _shot("05_metropole")
 	await _tabs("06_metropole")
+	# serviços e funcionários no fundo do estacionamento
+	_world().camera.focus(Vector2((24.0 - 29.5) * 32.0, (24.0 + 29.5) * 16.0), 1.2, true)
+	await _wait(1.5)
+	await _shot("08_servicos")
+	_world().focus_lot(true)
 	# a mesma cidade à noite
 	Game.hour = 22.5
 	await _wait(2.0)

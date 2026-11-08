@@ -73,6 +73,14 @@ func draw_into(target, o: Vector2) -> void:
 			_draw_gate(o)
 		"fence":
 			_draw_fence(o)
+		"svc_wash":
+			_draw_wash(o)
+		"svc_cafe":
+			_draw_cafe(o)
+		"svc_ev":
+			_draw_ev(o)
+		"svc_tire":
+			_draw_tire(o)
 		"kiosk":
 			_draw_kiosk(o)
 		"umbrella":
@@ -237,6 +245,90 @@ func _draw_fence(o: Vector2) -> void:
 		_c.draw_line(Iso.pg(a, zr) - o, Iso.pg(b, zr) - o, light, 2.0)
 	# base de concreto
 	_c.draw_line(Iso.pg(a, 0.5) - o, Iso.pg(b, 0.5) - o, Color("b8b2a4"), 3.0)
+
+
+func _pad(o: Vector2) -> void:
+	Iso.quad(_c, o, x0 - 0.1, y0 - 0.1, w + 0.2, d + 0.2, 0.0, Color("b8b2a4"))
+
+
+func _sign(o: Vector2, text_color: Color, h: float) -> void:
+	# placa no topo, na face da frente
+	Iso.prism(_c, o, x0 + w * 0.2, y0 + d - 0.12, w * 0.6, 0.1, h, 9.0, text_color, text_color.lightened(0.2))
+
+
+func _draw_wash(o: Vector2) -> void:
+	_pad(o)
+	var h := 24.0
+	Iso.shadow(_c, o, x0, y0, w, d, h)
+	# túnel de lavagem: paredes e teto, aberto na frente
+	Iso.prism(_c, o, x0, y0, 0.25, d, 0.0, h, Color("e8f4fb"))
+	Iso.prism(_c, o, x0 + 0.25, y0, w - 0.5, 0.2, 0.0, h, Color("cfe6f2"))
+	# rolos azuis dentro
+	for i in 2:
+		var gx := x0 + 0.7 + i * 0.9
+		Iso.prism(_c, o, gx, y0 + 0.3, 0.2, d - 0.5, 2.0, 16.0, Color("2f7fe0"), Color("5aa0ff"))
+	Iso.prism(_c, o, x0 + w - 0.25, y0, 0.25, d, 0.0, h, Color("e8f4fb"))
+	Iso.prism(_c, o, x0, y0, w, d, h, 3.0, Color("2f9be0"), Color("49b4f5"))
+	# gotas
+	for i in 6:
+		_c.draw_circle(Iso.p(x0 + 0.5 + i * 0.3, y0 + d + 0.15, 4.0 + (i % 3) * 3.0) - o, 1.6, Color("7fd4ff"))
+	_sign(o, Color("1f6fd0"), h + 3.0)
+
+
+func _draw_cafe(o: Vector2) -> void:
+	_pad(o)
+	var bw := minf(w, 1.2)
+	Iso.shadow(_c, o, x0, y0, bw, d * 0.7, 20)
+	Iso.prism(_c, o, x0, y0, bw, d * 0.7, 0.0, 18.0, Color("f2e6d0"))
+	_c.draw_colored_polygon(PackedVector2Array([
+		Iso.p(x0, y0 + d * 0.7, 19) - o, Iso.p(x0 + bw, y0 + d * 0.7, 19) - o,
+		Iso.p(x0 + bw, y0 + d * 0.7 + 0.35, 12) - o, Iso.p(x0, y0 + d * 0.7 + 0.35, 12) - o]), Color("8a4b2a"))
+	Iso.prism(_c, o, x0, y0, bw, d * 0.7, 18.0, 3.0, Color("6b3a20"))
+	# mesinhas com guarda-sol
+	var n := mini(1 + floors / 3, 3)
+	for i in n:
+		var tx := x0 + bw + 0.3 + (i % 2) * 0.35
+		var ty := y0 + 0.3 + i * 0.35
+		var base := Iso.p(tx, ty) - o
+		_c.draw_line(base, base - Vector2(0, 14), Color("dddddd"), 1.5)
+		_c.draw_colored_polygon(_ellipse(base - Vector2(0, 15), 9.0, 4.0), Color("e23b3b") if i % 2 == 0 else Color("f2f2f2"))
+
+
+func _draw_ev(o: Vector2) -> void:
+	_pad(o)
+	Iso.quad(_c, o, x0, y0, w, d, 0.05, Color("2e9e5b"))
+	var n := mini(2 + floors / 2, 6)
+	for i in n:
+		var px := x0 + 0.2 + (w - 0.4) * (float(i) / maxf(1.0, n - 1))
+		Iso.prism(_c, o, px - 0.08, y0 + 0.15, 0.16, 0.12, 0.0, 16.0, Color("f4f4f4"), Color("2fd47a"))
+		_c.draw_colored_polygon(PackedVector2Array([
+			Iso.p(px - 0.06, y0 + 0.271, 9) - o, Iso.p(px + 0.06, y0 + 0.271, 9) - o,
+			Iso.p(px + 0.06, y0 + 0.271, 13) - o, Iso.p(px - 0.06, y0 + 0.271, 13) - o]), Color("1fbf6a"))
+	# raio pintado no chão
+	var c := Iso.p(x0 + w * 0.5, y0 + d * 0.65) - o
+	var white := Color("f2f2f2")
+	_c.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -10), c + Vector2(6, -10), c + Vector2(-1, 1)]), white)
+	_c.draw_colored_polygon(PackedVector2Array([c + Vector2(-4, -1), c + Vector2(5, -1), c + Vector2(4, 1), c + Vector2(-5, 1)]), white)
+	_c.draw_colored_polygon(PackedVector2Array([c + Vector2(1, -1), c + Vector2(4, -1), c + Vector2(-5, 10)]), white)
+
+
+func _draw_tire(o: Vector2) -> void:
+	_pad(o)
+	var h := 20.0
+	Iso.shadow(_c, o, x0, y0, w * 0.75, d, h)
+	Iso.prism(_c, o, x0, y0, w * 0.75, d, 0.0, h, Color("8a8f99"), Color("a3a8b2"))
+	# porta de enrolar e faixa laranja
+	_c.draw_colored_polygon(PackedVector2Array([
+		Iso.p(x0 + 0.2, y0 + d, 0) - o, Iso.p(x0 + w * 0.6, y0 + d, 0) - o,
+		Iso.p(x0 + w * 0.6, y0 + d, 13) - o, Iso.p(x0 + 0.2, y0 + d, 13) - o]), Color("4a4f58"))
+	_c.draw_colored_polygon(PackedVector2Array([
+		Iso.p(x0, y0 + d, 15) - o, Iso.p(x0 + w * 0.75, y0 + d, 15) - o,
+		Iso.p(x0 + w * 0.75, y0 + d, 18) - o, Iso.p(x0, y0 + d, 18) - o]), Color("f28c1a"))
+	# pilha de pneus
+	var base := Iso.p(x0 + w * 0.88, y0 + d * 0.6) - o
+	for i in mini(2 + floors / 3, 5):
+		_c.draw_colored_polygon(_ellipse(base - Vector2(0, i * 4.0), 8.0, 3.5), Color("1e1e22"))
+		_c.draw_colored_polygon(_ellipse(base - Vector2(0, i * 4.0 + 0.5), 3.0, 1.3), Color("4a4f58"))
 
 
 func _draw_kiosk(o: Vector2) -> void:

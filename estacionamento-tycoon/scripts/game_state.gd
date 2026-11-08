@@ -36,6 +36,24 @@ const RESEARCH := {
 	"remote": {"name": "Gestão Remota", "desc": "+10% de renda enquanto o jogo está fechado, por nível.", "base": 2500.0, "time": 45.0, "max": 5},
 }
 const RESEARCH_GROWTH := 2.1
+
+## Serviços extras: cada cliente que estaciona pode usar (chance) e pagar (preço).
+const SERVICES := {
+	"wash": {"name": "Lava-Rápido", "desc": "Lavagem enquanto o carro fica estacionado.", "build": 5000.0, "up": 4000.0, "growth": 1.9, "max": 10, "chance": 0.12, "price": 25.0, "staff": "washer"},
+	"cafe": {"name": "Cafeteria", "desc": "Café e lanches para quem estaciona.", "build": 3000.0, "up": 2500.0, "growth": 1.85, "max": 10, "chance": 0.22, "price": 12.0, "staff": "cashier"},
+	"ev": {"name": "Carregador Elétrico", "desc": "Recarga de carros elétricos (mais comuns em cidades grandes).", "build": 20000.0, "up": 15000.0, "growth": 1.95, "max": 10, "chance": 0.05, "price": 40.0, "staff": ""},
+	"tire": {"name": "Borracharia", "desc": "Calibragem, troca de pneu e pequenos reparos.", "build": 12000.0, "up": 9000.0, "growth": 1.9, "max": 10, "chance": 0.05, "price": 60.0, "staff": "mechanic"},
+}
+
+## Funcionários: taxa de contratação + salário por hora (sobe com a cidade).
+const STAFF := {
+	"valet": {"name": "Manobrista", "desc": "Estaciona os carros: giro 8% mais rápido cada.", "hire": 800.0, "salary": 2000.0, "max": 6},
+	"guard": {"name": "Segurança", "desc": "Clientes aceitam pagar mais: +R$ 0,80 no preço justo e menos rejeição.", "hire": 1000.0, "salary": 2200.0, "max": 6},
+	"cashier": {"name": "Atendente", "desc": "Caixa e cafeteria: +4% de receita cada.", "hire": 600.0, "salary": 1500.0, "max": 6},
+	"washer": {"name": "Lavador", "desc": "Opera o lava-rápido (1 a cada 3 níveis).", "hire": 700.0, "salary": 1600.0, "max": 6},
+	"mechanic": {"name": "Mecânico", "desc": "Opera a borracharia (1 a cada 3 níveis).", "hire": 1500.0, "salary": 2800.0, "max": 4},
+	"cleaner": {"name": "Equipe de Limpeza", "desc": "Estacionamento limpo: +3% de chance de entrada cada.", "hire": 500.0, "salary": 1200.0, "max": 6},
+}
 const MIN_PRICE := 1.0
 const MAX_PRICE := 250.0
 
@@ -71,6 +89,8 @@ const MISSIONS := [
 	{"text": "Construa moradias 2 vezes", "type": "lvl_city", "goal": 2.0, "money": 2000.0, "gems": 10},
 	{"text": "Atraia empresas 2 vezes", "type": "lvl_jobs", "goal": 2.0, "money": 2500.0, "gems": 10},
 	{"text": "Conclua 3 pesquisas", "type": "research", "goal": 3.0, "money": 6000.0, "gems": 15},
+	{"text": "Construa o Lava-Rápido", "type": "service_wash", "goal": 1.0, "money": 4000.0, "gems": 10},
+	{"text": "Contrate 3 funcionários", "type": "staff", "goal": 3.0, "money": 5000.0, "gems": 10},
 	{"text": "Tenha 2.000 trabalhadores empregados", "type": "employed", "goal": 2000.0, "money": 8000.0, "gems": 15},
 	{"text": "Estacione 100 carros", "type": "cars", "goal": 100.0, "money": 3000.0, "gems": 10},
 	{"text": "Desbloqueie a Vila Nova", "type": "districts", "goal": 2.0, "money": 5000.0, "gems": 15},
@@ -103,6 +123,8 @@ var price_value: float = 8.0
 var research_lvl := {}
 var research_key := ""
 var research_end := 0.0
+var services := {}
+var staff := {}
 
 ## Vagas ocupadas agora (atualizado pela cena do estacionamento).
 var occupied: int = 0
@@ -208,6 +230,8 @@ func settle_population() -> void:
 
 func _simulate(delta: float) -> void:
 	check_research(Time.get_unix_time_from_system())
+	if salary_per_hour() > 0.0:
+		money = maxf(0.0, money - salary_per_hour() / 3600.0 * delta)
 	var target := target_population()
 	pop += (target - pop) * (1.0 - exp(-delta / 40.0))
 	hour += delta * 24.0 / DAY_SECONDS
@@ -280,12 +304,12 @@ func phase_name() -> String:
 
 ## Preço que os motoristas acham "justo": sobe com atratividade e riqueza da cidade.
 func fair_price() -> float:
-	return 8.0 + 1.2 * float(lvl.attract) + 0.25 * float(lvl.city) + 0.9 * float(lvl.get("comfort", 0)) + 1.5 * rlvl("contracts")
+	return 8.0 + 1.2 * float(lvl.attract) + 0.25 * float(lvl.city) + 0.9 * float(lvl.get("comfort", 0)) + 1.5 * rlvl("contracts") + 0.8 * staff_count("guard")
 
 
 ## Quanto o cliente "sente" o preço acima do justo (maior = rejeita mais).
 func price_sensitivity() -> float:
-	return clampf(2.0 - 0.045 * float(lvl.get("comfort", 0)) - 0.08 * rlvl("loyalty"), 0.6, 3.0)
+	return clampf(2.0 - 0.045 * float(lvl.get("comfort", 0)) - 0.08 * rlvl("loyalty") - 0.03 * staff_count("guard"), 0.6, 3.0)
 
 
 ## Fração de motoristas que aceitam o preço.
@@ -329,7 +353,7 @@ func enter_chance() -> float:
 
 
 func enter_chance_at(p: float) -> float:
-	var base := (0.35 + 0.05 * float(lvl.attract)) * (1.0 + 0.08 * rlvl("marketing"))
+	var base := (0.35 + 0.05 * float(lvl.attract)) * (1.0 + 0.08 * rlvl("marketing")) * (1.0 + 0.03 * staff_count("cleaner"))
 	return clampf(base * price_acceptance(p), 0.005, 0.95)
 
 
@@ -348,6 +372,7 @@ func shop_arrivals_per_sec() -> float:
 func income_mult() -> float:
 	var m := district_income_mult()
 	m *= 1.0 + 0.1 * rlvl("digital")
+	m *= 1.0 + 0.04 * staff_count("cashier")
 	if is_boosted():
 		m *= 2.0
 	return m
@@ -355,7 +380,7 @@ func income_mult() -> float:
 
 ## Multiplicador do tempo de permanência (manobristas fazem girar mais rápido).
 func stay_factor() -> float:
-	return 1.0 / (1.0 + 0.12 * rlvl("valet"))
+	return 1.0 / (1.0 + 0.12 * rlvl("valet") + 0.08 * staff_count("valet"))
 
 
 ## Receita esperada por segundo (usada para renda offline e para o HUD).
@@ -373,7 +398,149 @@ func expected_income_at(p: float) -> float:
 	var avg_stay := (w * STAY_WORK_SECONDS + sh * STAY_SHOP_SECONDS) / total * stay_factor()
 	var avg_hours := (w * HOURS_WORK + sh * HOURS_SHOP) / total
 	var served := minf(total, float(spots()) / avg_stay)
-	return served * p * avg_hours * income_mult()
+	return served * (p * avg_hours + service_value_per_car()) * income_mult()
+
+
+# ---------------------------------------------------------------- Serviços e funcionários
+
+func service_lvl(key: String) -> int:
+	return int(services.get(key, 0))
+
+
+func staff_count(key: String) -> int:
+	return int(staff.get(key, 0))
+
+
+func staff_total() -> int:
+	var n := 0
+	for k in staff.keys():
+		n += int(staff[k])
+	return n
+
+
+func service_cost(key: String) -> float:
+	var sv: Dictionary = SERVICES[key]
+	var l := service_lvl(key)
+	if l == 0:
+		return float(sv.build)
+	return floor(float(sv.up) * pow(float(sv.growth), float(l - 1)))
+
+
+func service_maxed(key: String) -> bool:
+	return service_lvl(key) >= int(SERVICES[key].max)
+
+
+func can_buy_service(key: String) -> bool:
+	return not service_maxed(key) and money >= service_cost(key)
+
+
+func buy_service(key: String) -> bool:
+	if not can_buy_service(key):
+		return false
+	money -= service_cost(key)
+	services[key] = service_lvl(key) + 1
+	add_xp(10.0 + 3.0 * service_lvl(key))
+	if service_lvl(key) == 1:
+		notify.emit("Novo serviço: %s!" % SERVICES[key].name)
+	changed.emit()
+	save_game()
+	return true
+
+
+## Fração do serviço funcionando (precisa de 1 funcionário a cada 3 níveis).
+func service_efficiency(key: String) -> float:
+	var role: String = SERVICES[key].staff
+	if role == "":
+		return 1.0
+	var needed := ceili(service_lvl(key) / 3.0)
+	if needed <= 0:
+		return 1.0
+	var have := staff_count(role)
+	if have <= 0:
+		return 0.25
+	return minf(1.0, float(have) / needed)
+
+
+func service_chance(key: String) -> float:
+	var l := service_lvl(key)
+	if l <= 0:
+		return 0.0
+	var c := float(SERVICES[key].chance) * (1.0 + 0.25 * (l - 1))
+	if key == "ev":
+		c *= 1.0 + phase_index()
+	return minf(c * service_efficiency(key), 0.9)
+
+
+## Preço do serviço acompanha a riqueza da cidade (preço justo do estacionamento).
+func service_price(key: String) -> float:
+	var l := maxi(1, service_lvl(key))
+	return float(SERVICES[key].price) * (1.0 + 0.3 * (l - 1)) * (fair_price() / 8.0)
+
+
+## Quanto, em média, cada cliente gasta em serviços.
+func service_value_per_car() -> float:
+	var v := 0.0
+	for k in SERVICES.keys():
+		v += service_chance(k) * service_price(k)
+	return v
+
+
+## Sorteia os serviços usados por um cliente que está saindo. Retorna [[nome, valor], ...].
+func roll_services(r: RandomNumberGenerator) -> Array:
+	var out: Array = []
+	for k in SERVICES.keys():
+		if service_lvl(k) > 0 and r.randf() < service_chance(k):
+			var amount := service_price(k) * income_mult()
+			money += amount
+			total_earned += amount
+			out.append([String(SERVICES[k].name), amount])
+	if not out.is_empty():
+		changed.emit()
+	return out
+
+
+func wage_level() -> float:
+	return sqrt(maxf(1.0, pop / 1000.0))
+
+
+func staff_salary(key: String) -> float:
+	return float(STAFF[key].salary) * wage_level()
+
+
+func staff_hire_cost(key: String) -> float:
+	return float(STAFF[key].hire) * wage_level() * (1.0 + 0.5 * staff_count(key))
+
+
+func salary_per_hour() -> float:
+	var t := 0.0
+	for k in staff.keys():
+		if STAFF.has(k):
+			t += staff_salary(k) * int(staff[k])
+	return t
+
+
+func can_hire(key: String) -> bool:
+	return staff_count(key) < int(STAFF[key].max) and money >= staff_hire_cost(key)
+
+
+func hire(key: String) -> bool:
+	if not can_hire(key):
+		return false
+	money -= staff_hire_cost(key)
+	staff[key] = staff_count(key) + 1
+	add_xp(5.0)
+	changed.emit()
+	save_game()
+	return true
+
+
+func fire(key: String) -> bool:
+	if staff_count(key) <= 0:
+		return false
+	staff[key] = staff_count(key) - 1
+	changed.emit()
+	save_game()
+	return true
 
 
 ## Preço que dá a maior receita esperada (busca simples).
@@ -470,8 +637,9 @@ func research_total() -> int:
 	return n
 
 
+## Receita líquida por hora (estacionamento + serviços - salários).
 func income_per_hour() -> float:
-	return expected_income_per_sec() * 3600.0
+	return expected_income_per_sec() * 3600.0 - salary_per_hour()
 
 
 func is_boosted() -> bool:
@@ -603,6 +771,10 @@ func mission_progress(i: int) -> float:
 			return employed()
 		"research":
 			return float(research_total())
+		"service_wash":
+			return float(service_lvl("wash"))
+		"staff":
+			return float(staff_total())
 		"districts":
 			return float(districts_unlocked)
 		"pop":
@@ -664,6 +836,8 @@ func to_dict() -> Dictionary:
 		"research_lvl": research_lvl,
 		"research_key": research_key,
 		"research_end": research_end,
+		"services": services,
+		"staff": staff,
 		"pop": pop,
 		"day": day,
 		"hour": hour,
@@ -699,6 +873,16 @@ func from_dict(d: Dictionary) -> void:
 	if not RESEARCH.has(research_key):
 		research_key = ""
 	research_end = float(d.get("research_end", 0.0))
+	services = {}
+	var sv: Dictionary = d.get("services", {})
+	for k in sv.keys():
+		if SERVICES.has(String(k)):
+			services[String(k)] = int(sv[k])
+	staff = {}
+	var st: Dictionary = d.get("staff", {})
+	for k in st.keys():
+		if STAFF.has(String(k)):
+			staff[String(k)] = int(st[k])
 	missions_claimed = []
 	for v in d.get("missions_claimed", []):
 		missions_claimed.append(int(v))
@@ -731,7 +915,8 @@ func load_game() -> void:
 		# O boost não vale para o período offline.
 		var boosted := boost_until
 		boost_until = 0.0
-		offline_pending = expected_income_per_sec() * offline_seconds * (OFFLINE_EFFICIENCY + 0.1 * rlvl("remote"))
+		var net := maxf(0.0, expected_income_per_sec() - salary_per_hour() / 3600.0)
+		offline_pending = net * offline_seconds * (OFFLINE_EFFICIENCY + 0.1 * rlvl("remote"))
 		boost_until = boosted
 
 

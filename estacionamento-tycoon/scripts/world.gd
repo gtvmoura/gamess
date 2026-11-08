@@ -21,6 +21,8 @@ const LEFT_LANE_X := 18.25
 const RIGHT_LANE_X := 31.5
 const TOP_AISLE_Y := 17.5
 const SPOTS_PER_ROW := 24
+const SERVICE_Y0 := 30.35   # faixa no fundo do estacionamento reservada aos serviços
+const SERVICE_SLOTS := {"wash": [18.2, 2.6], "cafe": [21.3, 1.9], "ev": [23.7, 2.6], "tire": [26.8, 2.6]}
 const LANE := 0.2
 const ROAD_SPEED := 3.2
 const LOT_SPEED := 2.2
@@ -185,7 +187,7 @@ func _rebuild() -> void:
 		_ground_key = gkey
 		queue_redraw()
 		overlay.queue_redraw()
-	var key := "%d|%d|%d|%d" % [int(_pop_level() * 8.0), Game.districts_unlocked, int(Game.lvl.attract), Game.spots() / 48]
+	var key := "%d|%d|%d|%d|%s|%s" % [int(_pop_level() * 8.0), Game.districts_unlocked, int(Game.lvl.attract), Game.spots() / 48, str(Game.services), str(Game.staff)]
 	if key == _city_key:
 		return
 	_city_key = key
@@ -310,6 +312,8 @@ func _build_lot_props() -> void:
 	_entry_gate = _prop("gate", 24.45, LOT.position.y + 0.12, -1.15, 0.0)
 	_exit_gate = _prop("gate", 25.55, LOT.position.y + 0.12, 1.2, 0.0)
 	_build_fence()
+	_build_services()
+	_build_staff()
 	if a >= 3:
 		var k = _prop("kiosk", LOT.position.x + 0.05, LOT.position.y + 0.05, 0.9, 0.85)
 		k.color = Color("f2efe6")
@@ -329,7 +333,7 @@ func _build_lot_props() -> void:
 	tr.seed = 555
 	var free_y := 21.6 + 3.0 * (units - 1) + 0.6
 	var yy := free_y
-	while yy < LOT.end.y - 0.4:
+	while yy < SERVICE_Y0 - 0.3:
 		var xx := LOT.position.x + 0.6
 		while xx < LOT.end.x - 0.4:
 			if tr.randf() < 0.45:
@@ -345,6 +349,35 @@ func _build_lot_props() -> void:
 		var u := c / 2
 		var y := 18.0 + 3.0 * u + (2.0 if c % 2 == 1 else 0.0)
 		_prop("canopy", 19.0, y, 12.0, 1.0)
+
+
+func _build_services() -> void:
+	for k in SERVICE_SLOTS.keys():
+		if Game.service_lvl(k) <= 0:
+			continue
+		var slot: Array = SERVICE_SLOTS[k]
+		var sp = _prop("svc_" + k, float(slot[0]), SERVICE_Y0, float(slot[1]), 1.3)
+		sp.floors = Game.service_lvl(k)
+		sp.queue_redraw()
+
+
+## Funcionários andando pelo estacionamento (colete laranja).
+func _build_staff() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 77
+	var n := mini(Game.staff_total(), 16)
+	for i in n:
+		var wk = WalkerScript.new()
+		var y := TOP_AISLE_Y if i % 2 == 0 else 19.5 + 3.0 * float(r.randi_range(0, 1))
+		var p0 := Vector2(r.randf_range(18.5, 22.0), y)
+		var p1 := Vector2(r.randf_range(27.0, 31.0), y)
+		if i % 3 == 2:
+			p0 = Vector2(LEFT_LANE_X, 18.0)
+			p1 = Vector2(LEFT_LANE_X, r.randf_range(22.0, 29.0))
+		wk.setup(r, p0, p1)
+		wk.shirt = Color("ff7a1a")
+		objects.add_child(wk)
+		_static_nodes.append(wk)
 
 
 ## Cerca metálica em volta do estacionamento, aberta na entrada/saída.
@@ -697,6 +730,10 @@ func _car_leave(car) -> void:
 	var hours: float = rng.randf_range(4.0, 8.0) if car.worker else rng.randf_range(1.0, 2.0)
 	var paid := Game.car_paid(Game.price() * roundf(hours * 2.0) / 2.0)
 	_floating_text("+" + Game.money_str(paid), Iso.pg(car.grid, 26.0))
+	var extra := Game.roll_services(rng)
+	for i in extra.size():
+		var e: Array = extra[i]
+		_floating_text("+%s %s" % [Game.money_str(e[1]), e[0]], Iso.pg(car.grid, 44.0 + 16.0 * i), Color("7fe7ff"))
 	var aisle := spot_aisle(idx)
 	var pts: Array = [
 		Vector2(car.grid.x, aisle), Vector2(RIGHT_LANE_X, aisle),
@@ -710,14 +747,14 @@ func _car_leave(car) -> void:
 	_leaving.append(car)
 
 
-func _floating_text(text: String, pos: Vector2) -> void:
+func _floating_text(text: String, pos: Vector2, color: Color = Color("7dff7a")) -> void:
 	if _fx_budget < 1.0 or camera.zoom.x < 0.45:
 		return
 	_fx_budget -= 1.0
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_size_override("font_size", 18)
-	label.add_theme_color_override("font_color", Color("7dff7a"))
+	label.add_theme_color_override("font_color", color)
 	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	label.add_theme_constant_override("outline_size", 5)
 	label.position = pos - Vector2(30, 10)

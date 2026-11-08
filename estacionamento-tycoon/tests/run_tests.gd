@@ -90,6 +90,31 @@ func _initialize() -> void:
 	check(g.rush_research() and g.rlvl("valet") == 1, "acelera com gemas")
 	check(g.stay_factor() < 1.0, "manobristas diminuem o tempo de permanência")
 
+	# Serviços e funcionários
+	g.money = 1000000.0
+	var v0: float = g.expected_income_per_sec()
+	check(g.buy_service("wash"), "constrói lava-rápido")
+	check(g.service_chance("wash") > 0.0, "lava-rápido tem clientes")
+	check(g.service_efficiency("wash") < 1.0, "sem lavador funciona parcialmente")
+	check(g.hire("washer"), "contrata lavador")
+	check(is_equal_approx(g.service_efficiency("wash"), 1.0), "com lavador funciona 100%")
+	check(g.expected_income_per_sec() > v0, "serviços aumentam a receita esperada")
+	var rr := RandomNumberGenerator.new()
+	rr.seed = 1
+	var got := 0.0
+	for i in 200:
+		for e in g.roll_services(rr):
+			got += float(e[1])
+	check(got > 0.0, "clientes usam serviços (%s em 200 saídas)" % g.money_str(got))
+	check(g.salary_per_hour() > 0.0, "funcionário tem salário")
+	var m0: float = g.money
+	g._simulate(60.0)
+	check(g.money < m0 + 0.001, "salário é descontado com o tempo")
+	var sf: float = g.stay_factor()
+	g.hire("valet")
+	check(g.stay_factor() < sf, "manobrista acelera o giro")
+	check(g.fire("valet") and g.staff_count("valet") == 0, "demite funcionário")
+
 	# Moradores x empregos
 	g.lvl.city = 10
 	g.lvl.jobs = 0
@@ -157,6 +182,7 @@ func _initialize() -> void:
 	check(is_equal_approx(g2.population(), g.population()), "save mantém moradores")
 	check(g2.day == g.day, "save mantém o dia")
 	check(g2.rlvl("digital") == 1, "save mantém pesquisas")
+	check(g2.service_lvl("wash") == 1 and g2.staff_count("washer") == 1, "save mantém serviços e funcionários")
 	check(is_equal_approx(g2.price(), g.price()), "save mantém o preço")
 	check(g2.districts_unlocked == g.districts_unlocked, "save mantém bairros")
 	check(g2.missions_claimed.has(0), "save mantém missões")

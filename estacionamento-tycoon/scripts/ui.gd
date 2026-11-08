@@ -225,8 +225,8 @@ func _build_bottom_bar() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 5)
 	bar.add_child(row)
-	for tab in [["Melhorias", "upgrades"], ["Cidade", "city"], ["Pesquisa", "research"], ["Expansão", "expansion"], ["Missões", "missions"]]:
-		var b := _button(tab[0], _open_tab.bind(tab[1]), 18)
+	for tab in [["Melhorias", "upgrades"], ["Negócios", "business"], ["Cidade", "city"], ["Pesquisa", "research"], ["Expansão", "expansion"], ["Missões", "missions"]]:
+		var b := _button(tab[0], _open_tab.bind(tab[1]), 15)
 		b.clip_text = true
 		b.custom_minimum_size = Vector2(60, 0)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -243,7 +243,9 @@ func _update_hud() -> void:
 	xp_bar.max_value = Game.xp_needed()
 	xp_bar.value = Game.xp
 	money_label.text = Game.money_str(Game.money)
-	rate_label.text = "+%s/h" % Game.money_str(Game.income_per_hour())
+	var inc := Game.income_per_hour()
+	rate_label.text = ("+" if inc >= 0.0 else "") + Game.money_str(inc) + "/h"
+	rate_label.add_theme_color_override("font_color", C_GREEN_TEXT if inc >= 0.0 else Color("ff6b6b"))
 	gems_label.text = "%d gemas" % Game.gems
 	boost_label.text = ("2x  " + Game.time_str(Game.boost_seconds_left())) if Game.is_boosted() else ""
 	status_label.text = "Vagas: %d/%d   Preço: %s/h   Entrada: %d%%" % [
@@ -378,6 +380,9 @@ func _rebuild_window() -> void:
 		"research":
 			window_title.text = "Centro de Pesquisa"
 			_build_research()
+		"business":
+			window_title.text = "Serviços e Funcionários"
+			_build_business()
 		"offline":
 			window_title.text = "Bem-vindo de volta!"
 			_build_offline()
@@ -521,6 +526,106 @@ func _build_price_card() -> void:
 		ideal.text = "Preço ideal agora: %s/h" % Game.price_str(best[0])
 	refresh.call()
 	refreshers.append(refresh)
+
+
+func _section(text: String) -> void:
+	var l := _label(text, 24, C_GOLD)
+	window_body.add_child(l)
+
+
+func _build_business() -> void:
+	var summary := _label("", 18, C_GREEN_TEXT)
+	summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	window_body.add_child(summary)
+	var sref := func():
+		var per_car := Game.service_value_per_car() * Game.income_mult()
+		summary.text = "Cada cliente gasta em média %s em serviços.\nSalários: %s/h." % [
+			Game.money_str(per_car), Game.money_str(Game.salary_per_hour())]
+	sref.call()
+	refreshers.append(sref)
+
+	_section("Serviços")
+	for key in Game.SERVICES.keys():
+		var sv: Dictionary = Game.SERVICES[key]
+		var card := _card()
+		window_body.add_child(card)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		card.add_child(row)
+		var text := VBoxContainer.new()
+		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var lv := Game.service_lvl(key)
+		text.add_child(_label(sv.name + ("  (nível %d)" % lv if lv > 0 else "  (não construído)"), 21))
+		var desc := _label(sv.desc, 16, C_MUTED)
+		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		text.add_child(desc)
+		var stat := _label("", 16, C_GREEN_TEXT)
+		stat.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		text.add_child(stat)
+		row.add_child(text)
+		var btn := _button("", func(): _after_action(Game.buy_service(key)), 18)
+		btn.custom_minimum_size = Vector2(160, 64)
+		row.add_child(btn)
+		var refresh := func():
+			var l := Game.service_lvl(key)
+			if l > 0:
+				var t := "%d%% dos clientes usam, %s cada" % [int(round(Game.service_chance(key) * 100.0)), Game.money_str(Game.service_price(key))]
+				var role: String = sv.staff
+				if role != "" and Game.service_efficiency(key) < 1.0:
+					t += "\nPrecisa de mais %s! Funcionando a %d%%." % [Game.STAFF[role].name, int(Game.service_efficiency(key) * 100.0)]
+					stat.add_theme_color_override("font_color", Color("ffb347"))
+				else:
+					stat.add_theme_color_override("font_color", C_GREEN_TEXT)
+				stat.text = t
+			else:
+				stat.text = "Preço base %s por uso" % Game.money_str(float(sv.price))
+			if Game.service_maxed(key):
+				btn.text = "MÁXIMO"
+				btn.disabled = true
+			else:
+				btn.text = ("Construir\n" if l == 0 else "") + Game.money_str(Game.service_cost(key))
+				btn.disabled = not Game.can_buy_service(key)
+		refresh.call()
+		refreshers.append(refresh)
+
+	_section("Funcionários")
+	for key in Game.STAFF.keys():
+		var st: Dictionary = Game.STAFF[key]
+		var card := _card()
+		window_body.add_child(card)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		card.add_child(row)
+		var text := VBoxContainer.new()
+		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		text.add_child(_label("%s  (%d/%d)" % [st.name, Game.staff_count(key), int(st.max)], 21))
+		var desc := _label(st.desc, 16, C_MUTED)
+		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		text.add_child(desc)
+		var sal := _label("", 16, C_MUTED)
+		text.add_child(sal)
+		row.add_child(text)
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 4)
+		var hire := _button("", func(): _after_action(Game.hire(key)), 17)
+		hire.custom_minimum_size = Vector2(150, 50)
+		col.add_child(hire)
+		var fire := _button("Demitir", func(): _after_action(Game.fire(key)), 15)
+		fire.custom_minimum_size = Vector2(150, 36)
+		fire.add_theme_stylebox_override("normal", _box(Color("5a2a35"), 10, 6))
+		fire.visible = Game.staff_count(key) > 0
+		col.add_child(fire)
+		row.add_child(col)
+		var refresh := func():
+			sal.text = "Salário: %s/h cada" % Game.money_str(Game.staff_salary(key))
+			if Game.staff_count(key) >= int(st.max):
+				hire.text = "MÁXIMO"
+				hire.disabled = true
+			else:
+				hire.text = "Contratar " + Game.money_str(Game.staff_hire_cost(key))
+				hire.disabled = not Game.can_hire(key)
+		refresh.call()
+		refreshers.append(refresh)
 
 
 func _nudge_price(dir: int) -> void:
