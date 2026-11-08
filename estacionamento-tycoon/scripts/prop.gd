@@ -71,6 +71,8 @@ func draw_into(target, o: Vector2) -> void:
 			_draw_booth(o)
 		"gate":
 			_draw_gate(o)
+		"fence":
+			_draw_fence(o)
 		"kiosk":
 			_draw_kiosk(o)
 		"umbrella":
@@ -220,6 +222,21 @@ func _draw_gate(o: Vector2) -> void:
 		var a := pivot + dir * length * (float(i) / segs)
 		var b := pivot + dir * length * (float(i + 1) / segs)
 		_c.draw_line(a, b, Color("e23b3b") if i % 2 == 0 else Color("f4f4f4"), 3.0)
+
+
+func _draw_fence(o: Vector2) -> void:
+	var a := Vector2(x0, y0)
+	var b := Vector2(x0 + w, y0 + d)
+	var metal := Color("3b3f47")
+	var light := Color("8a919c")
+	var n := maxi(1, int(round(a.distance_to(b) / 0.33)))
+	for i in n + 1:
+		var g := a.lerp(b, float(i) / n)
+		_c.draw_line(Iso.pg(g, 0.0) - o, Iso.pg(g, 13.0) - o, metal, 2.0)
+	for zr in [5.0, 12.0]:
+		_c.draw_line(Iso.pg(a, zr) - o, Iso.pg(b, zr) - o, light, 2.0)
+	# base de concreto
+	_c.draw_line(Iso.pg(a, 0.5) - o, Iso.pg(b, 0.5) - o, Color("b8b2a4"), 3.0)
 
 
 func _draw_kiosk(o: Vector2) -> void:

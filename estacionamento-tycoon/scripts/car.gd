@@ -29,9 +29,27 @@ func _ready() -> void:
 func setup(rng: RandomNumberGenerator, start: Vector2) -> void:
 	body_color = COLORS[rng.randi_range(0, COLORS.size() - 1)]
 	var r := rng.randf()
-	kind = 2 if r < 0.04 else (1 if r < 0.2 else 0)
+	# 0 sedã, 1 picape, 2 ônibus, 3 hatch, 4 SUV, 5 van, 6 táxi
+	if r < 0.04:
+		kind = 2
+	elif r < 0.36:
+		kind = 0
+	elif r < 0.56:
+		kind = 3
+	elif r < 0.72:
+		kind = 4
+	elif r < 0.82:
+		kind = 1
+	elif r < 0.9:
+		kind = 5
+	else:
+		kind = 6
 	if kind == 2:
 		body_color = Color("f2c230") if rng.randf() < 0.5 else Color("3a8fd9")
+	elif kind == 6:
+		body_color = Color("f5c518")
+	elif kind == 5 and rng.randf() < 0.6:
+		body_color = Color("eeeeee")
 	grid = start
 	position = Iso.pg(grid)
 	queue_redraw()
@@ -74,58 +92,98 @@ func _draw() -> void:
 	b.flush(get_canvas_item())
 
 
-func _draw_body(b) -> void:
-	var length := 0.46
-	var width := 0.24
-	var body_h := 7.0
-	var cab_h := 5.0
-	if kind == 1:
-		length = 0.52
-		width = 0.26
-		body_h = 9.0
-	elif kind == 2:
-		length = 0.95
-		width = 0.3
-		body_h = 16.0
-		cab_h = 0.0
-	var along_x := absf(dir.x) >= absf(dir.y)
-	var lx := length if along_x else width
-	var ly := width if along_x else length
-	var o := Vector2.ZERO
-	Iso.quad(b, o, -lx / 2.0 + 0.06, -ly / 2.0 + 0.06, lx, ly, 0.0, Color(0, 0, 0, 0.3))
-	Iso.prism(b, o, -lx / 2.0, -ly / 2.0, lx, ly, 2.0, body_h, body_color)
-	if kind == 2:
-		# janelas do ônibus
-		var glass := Color("26384f")
-		for i in 5:
-			var t0 := 0.08 + i * 0.18
-			if along_x:
-				_face_quad(b, -lx / 2.0 + lx * t0, ly / 2.0, -lx / 2.0 + lx * (t0 + 0.12), ly / 2.0, 9.0, 15.0, glass)
-			else:
-				_face_quad(b, lx / 2.0, -ly / 2.0 + ly * t0, lx / 2.0, -ly / 2.0 + ly * (t0 + 0.12), 9.0, 15.0, glass.darkened(0.2))
-		return
-	# cabine: deslocada para trás em relação ao sentido
-	var cl := 0.55
-	var cx := -lx / 2.0 + lx * 0.12
-	var cy := -ly / 2.0 + ly * 0.12
-	var cw := lx * 0.76
-	var cd := ly * 0.76
-	if along_x:
-		cw = lx * cl
-		cx = -cw / 2.0 - dir.x * lx * 0.1
+var _b = null
+var _ax := true      # anda ao longo do eixo x?
+var _fd := 1.0       # sentido (+1/-1) ao longo do eixo
+
+
+## Caixa em coordenadas do carro: f = frente/trás, s = lado. Converte para a grade.
+func _box(f0: float, f1: float, s0: float, s1: float, z0: float, h: float, color: Color, top: Color = Color(0, 0, 0, 0)) -> void:
+	var a := minf(f0 * _fd, f1 * _fd)
+	var c := maxf(f0 * _fd, f1 * _fd)
+	if _ax:
+		Iso.prism(_b, Vector2.ZERO, a, s0, c - a, s1 - s0, z0, h, color, top)
 	else:
-		cd = ly * cl
-		cy = -cd / 2.0 - dir.y * ly * 0.1
-	if kind == 1:
-		# caminhonete: cabine na frente, caçamba atrás
-		if along_x:
-			cw = lx * 0.4
-			cx = (lx * 0.1 if dir.x > 0 else -lx * 0.5)
+		Iso.prism(_b, Vector2.ZERO, s0, a, s1 - s0, c - a, z0, h, color, top)
+
+
+func _draw_body(b) -> void:
+	_b = b
+	_ax = absf(dir.x) >= absf(dir.y)
+	_fd = signf(dir.x if _ax else dir.y)
+	if _fd == 0.0:
+		_fd = 1.0
+	var glass := Color("2a3d55")
+	var tire := Color("1e1e22")
+	var L := 0.46
+	var W := 0.24
+	var dims := {1: Vector2(0.52, 0.26), 2: Vector2(0.95, 0.3), 3: Vector2(0.40, 0.23), 4: Vector2(0.50, 0.27), 5: Vector2(0.52, 0.27)}
+	if dims.has(kind):
+		var dv: Vector2 = dims[kind]
+		L = dv.x
+		W = dv.y
+	var hl := L / 2.0
+	var hw := W / 2.0
+	# sombra
+	if _ax:
+		Iso.quad(b, Vector2.ZERO, -hl + 0.06, -hw + 0.07, L, W, 0.0, Color(0, 0, 0, 0.3))
+	else:
+		Iso.quad(b, Vector2.ZERO, -hw + 0.06, -hl + 0.07, W, L, 0.0, Color(0, 0, 0, 0.3))
+	# rodas (aparecem um pouco abaixo da carroceria)
+	for fw in [-hl * 0.62, hl * 0.62]:
+		_box(fw - 0.05, fw + 0.05, -hw - 0.01, hw + 0.01, 0.0, 4.0, tire)
+	var c := body_color
+	match kind:
+		2:  # ônibus
+			_box(-hl, hl, -hw, hw, 2.0, 18.0, c, c.lightened(0.15))
+			_band(-hl + 0.06, hl - 0.12, hw, 10.0, 16.0, glass)
+			_box(-hl + 0.1, -hl + 0.3, -hw * 0.6, hw * 0.6, 20.0, 2.0, Color("c9ccd2"))
+		1:  # picape: cabine na frente, caçamba atrás
+			_box(-hl, hl, -hw, hw, 2.0, 7.0, c)
+			_box(-0.02, hl * 0.55, -hw * 0.9, hw * 0.9, 9.0, 6.0, glass, c.lightened(0.12))
+			_box(-hl + 0.03, -0.05, -hw + 0.03, hw - 0.03, 8.9, 0.2, c.darkened(0.45))
+		4:  # SUV
+			_box(-hl, hl, -hw, hw, 2.5, 8.5, c)
+			_box(-hl * 0.8, hl * 0.45, -hw * 0.88, hw * 0.88, 11.0, 6.0, glass, c.lightened(0.1))
+			_box(-hl * 0.7, hl * 0.3, -hw * 0.6, -hw * 0.5, 17.0, 1.0, Color("333333"))
+			_box(-hl * 0.7, hl * 0.3, hw * 0.5, hw * 0.6, 17.0, 1.0, Color("333333"))
+		5:  # van
+			_box(-hl, hl, -hw, hw, 2.0, 15.0, c, c.lightened(0.1))
+			_band(hl * 0.35, hl - 0.02, hw, 9.0, 14.0, glass)
+			if _fd > 0.0:
+				_box(hl - 0.005, hl + 0.002, -hw * 0.8, hw * 0.8, 9.0, 5.0, glass)
+		3:  # hatch
+			_box(-hl, hl, -hw, hw, 2.0, 6.5, c)
+			_box(-hl * 0.95, hl * 0.3, -hw * 0.86, hw * 0.86, 8.5, 5.0, glass, c.lightened(0.12))
+		_:  # sedã e táxi
+			_box(-hl, hl, -hw, hw, 2.0, 6.5, c)
+			_box(-hl * 0.45, hl * 0.35, -hw * 0.86, hw * 0.86, 8.5, 5.0, glass, c.lightened(0.12))
+			if kind == 6:
+				_box(-0.04, 0.04, -hw * 0.4, hw * 0.4, 13.5, 3.0, Color("ffffff"), Color("e23b3b"))
+	# faróis (frente) ou lanternas (trás), só no lado virado para a câmera
+	var z := 4.0 if kind != 2 else 6.0
+	if _fd > 0.0:
+		_lights(hl, hw, z, Color("fff6c0"))
+	else:
+		_lights(-hl, hw, z, Color("e0302a"))
+
+
+## Faixa de janelas na lateral visível do carro.
+func _band(f0: float, f1: float, hw: float, za: float, zb: float, color: Color) -> void:
+	var side := hw + 0.003
+	var a := minf(f0 * _fd, f1 * _fd)
+	var c := maxf(f0 * _fd, f1 * _fd)
+	if _ax:
+		_b.draw_colored_polygon(PackedVector2Array([Iso.p(a, side, za), Iso.p(c, side, za), Iso.p(c, side, zb), Iso.p(a, side, zb)]), color)
+	else:
+		_b.draw_colored_polygon(PackedVector2Array([Iso.p(side, a, za), Iso.p(side, c, za), Iso.p(side, c, zb), Iso.p(side, a, zb)]), color.darkened(0.2))
+
+
+func _lights(f: float, hw: float, z: float, color: Color) -> void:
+	var ff := f * _fd + 0.004
+	for s0 in [-hw * 0.85, hw * 0.45]:
+		var s1: float = s0 + hw * 0.4
+		if _ax:
+			_b.draw_colored_polygon(PackedVector2Array([Iso.p(ff, s0, z), Iso.p(ff, s1, z), Iso.p(ff, s1, z + 2.5), Iso.p(ff, s0, z + 2.5)]), color)
 		else:
-			cd = ly * 0.4
-			cy = (ly * 0.1 if dir.y > 0 else -ly * 0.5)
-	Iso.prism(b, o, cx, cy, cw, cd, 2.0 + body_h, cab_h, Color("26384f"), body_color.lightened(0.1))
-
-
-func _face_quad(b, ax: float, ay: float, bx: float, by: float, za: float, zb: float, c: Color) -> void:
-	b.draw_colored_polygon(PackedVector2Array([Iso.p(ax, ay, za), Iso.p(bx, by, za), Iso.p(bx, by, zb), Iso.p(ax, ay, zb)]), c)
+			_b.draw_colored_polygon(PackedVector2Array([Iso.p(s0, ff, z), Iso.p(s1, ff, z), Iso.p(s1, ff, z + 2.5), Iso.p(s0, ff, z + 2.5)]), color)

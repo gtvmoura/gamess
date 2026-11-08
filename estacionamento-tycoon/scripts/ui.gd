@@ -36,6 +36,7 @@ var _refresh_acc := 0.0
 var top_inset := 0.0
 var fps_label: Label
 var price_slider: HSlider
+var window_scroll: ScrollContainer
 
 
 func _ready() -> void:
@@ -282,6 +283,9 @@ func _build_window() -> void:
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.scroll_deadzone = 12
+	scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	window_scroll = scroll
 	v.add_child(scroll)
 	window_body = VBoxContainer.new()
 	window_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -377,6 +381,18 @@ func _rebuild_window() -> void:
 		"offline":
 			window_title.text = "Bem-vindo de volta!"
 			_build_offline()
+	_let_scroll(window_body)
+
+
+## Faz cartões, rótulos e botões deixarem o arrasto chegar no ScrollContainer
+## (o toque curto continua apertando o botão). Sliders continuam capturando.
+func _let_scroll(node: Node) -> void:
+	for c in node.get_children():
+		if c is Slider:
+			continue
+		if c is Control:
+			(c as Control).mouse_filter = Control.MOUSE_FILTER_PASS
+		_let_scroll(c)
 
 
 func _after_action(ok: bool) -> void:

@@ -305,9 +305,11 @@ func _build_city(br: RandomNumberGenerator) -> void:
 func _build_lot_props() -> void:
 	var a := int(Game.lvl.attract)
 	var units := ceili(float(Game.spots()) / (SPOTS_PER_ROW * 2))
-	_prop("booth", ENTRY_X - 1.0, LOT.position.y + 0.05, 0.5, 0.4)
-	_entry_gate = _prop("gate", ENTRY_X - 0.45, LOT.position.y + 0.12, 0.9, 0.0)
-	_exit_gate = _prop("gate", EXIT_X - 0.45, LOT.position.y + 0.12, 0.9, 0.0)
+	# cabine na ilha entre a entrada e a saída (fora do caminho dos carros)
+	_prop("booth", 24.6, LOT.position.y + 0.06, 0.55, 0.35)
+	_entry_gate = _prop("gate", 24.45, LOT.position.y + 0.12, -1.15, 0.0)
+	_exit_gate = _prop("gate", 25.55, LOT.position.y + 0.12, 1.2, 0.0)
+	_build_fence()
 	if a >= 3:
 		var k = _prop("kiosk", LOT.position.x + 0.05, LOT.position.y + 0.05, 0.9, 0.85)
 		k.color = Color("f2efe6")
@@ -343,6 +345,38 @@ func _build_lot_props() -> void:
 		var u := c / 2
 		var y := 18.0 + 3.0 * u + (2.0 if c % 2 == 1 else 0.0)
 		_prop("canopy", 19.0, y, 12.0, 1.0)
+
+
+## Cerca metálica em volta do estacionamento, aberta na entrada/saída.
+func _build_fence() -> void:
+	var x0 := LOT.position.x
+	var y0 := LOT.position.y
+	var x1 := LOT.end.x
+	var y1 := LOT.end.y
+	var x := x0
+	while x < x1 - 0.01:
+		var nx := minf(x + 1.0, x1)
+		if nx <= 22.9 or x >= 27.2:
+			_fence_seg(x, y0, nx - x, 0.0, true)
+		elif x < 22.9:
+			_fence_seg(x, y0, 22.9 - x, 0.0, true)
+		elif nx > 27.2:
+			_fence_seg(27.2, y0, nx - 27.2, 0.0, true)
+		_fence_seg(x, y1, nx - x, 0.0, false)
+		x = nx
+	var y := y0
+	while y < y1 - 0.01:
+		var ny := minf(y + 1.0, y1)
+		_fence_seg(x0, y, 0.0, ny - y, true)
+		_fence_seg(x1, y, 0.0, ny - y, false)
+		y = ny
+
+
+func _fence_seg(x: float, y: float, w: float, d: float, back: bool) -> void:
+	var f = _prop("fence", x, y, w, d)
+	# lados de trás ficam atrás dos carros; os da frente, na frente
+	if back:
+		f.position = Iso.p(x, y) - Vector2(0, 1)
 
 
 func _build_beach(br: RandomNumberGenerator) -> void:

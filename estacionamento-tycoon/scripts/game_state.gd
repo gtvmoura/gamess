@@ -285,14 +285,19 @@ func fair_price() -> float:
 
 ## Quanto o cliente "sente" o preço acima do justo (maior = rejeita mais).
 func price_sensitivity() -> float:
-	return clampf(2.2 - 0.05 * float(lvl.get("comfort", 0)) - 0.1 * rlvl("loyalty"), 0.8, 3.0)
+	return clampf(2.0 - 0.045 * float(lvl.get("comfort", 0)) - 0.08 * rlvl("loyalty"), 0.6, 3.0)
 
 
-## Fração de motoristas que aceitam o preço (1 = preço justo).
+## Fração de motoristas que aceitam o preço.
+## Até o preço justo ninguém desiste (mais barato atrai um pouco mais);
+## acima dele a rejeição cresce conforme a sensibilidade.
 func price_acceptance(p: float = -1.0) -> float:
 	if p <= 0.0:
 		p = price()
-	return pow(fair_price() / p, price_sensitivity())
+	var r := p / fair_price()
+	if r <= 1.0:
+		return 1.0 + 0.3 * (1.0 - r)
+	return exp(-price_sensitivity() * (r - 1.0))
 
 
 ## Carros de trabalhadores indo para o centro (média do dia).
