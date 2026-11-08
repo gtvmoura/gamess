@@ -22,7 +22,7 @@ jobs:
       - name: Importar projeto
         run: timeout 300 godot --headless --import --path estacionamento-tycoon || true
       - name: Testes de economia
-        run: godot --headless --path estacionamento-tycoon --script res://tests/run_tests.gd
+        run: timeout 120 godot --headless --path estacionamento-tycoon --script res://tests/run_tests.gd
       - name: Rodar o jogo (simula 30 segundos)
         run: |
           timeout 300 godot --headless --path estacionamento-tycoon --fixed-fps 60 --quit-after 1800 2>&1 | tee run.log
@@ -72,3 +72,15 @@ jobs:
             Baixe o arquivo .apk abaixo no celular e instale (permita "fontes desconhecidas").
           make_latest: true
           files: build/android/estacionamento-tycoon.apk
+      - name: Publicar APK na branch "apk"
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          git config --global --add safe.directory "$PWD"
+          mkdir apk-branch && cp build/android/estacionamento-tycoon.apk apk-branch/
+          cd apk-branch
+          git init -q -b apk
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "APK do commit ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" apk

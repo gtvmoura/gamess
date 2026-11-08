@@ -19,6 +19,10 @@ func _initialize() -> void:
 		var s = load(path)
 		check(s != null and s.can_instantiate(), "script compila: " + path)
 
+	if failures > 0:
+		printerr("Scripts com erro de compilação; abortando.")
+		quit(1)
+		return
 	var GameScript = load("res://scripts/game_state.gd")
 	var g = GameScript.new()
 
