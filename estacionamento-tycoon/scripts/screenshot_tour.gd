@@ -78,7 +78,7 @@ func _run() -> void:
 	await _shot("03_crescimento")
 	# ficha de um cliente (toque no carro)
 	for c in _world().objects.get_children():
-		if c.get_script() == _world().CarScript and c.cname != "" and not c.angry:
+		if c.has_method("go") and c.cname != "" and not c.angry:
 			_ui().show_customer(c)
 			await _wait(1.0)
 			await _shot("03b_cliente")
