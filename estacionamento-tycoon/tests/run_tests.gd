@@ -40,9 +40,18 @@ func _initialize() -> void:
 
 	# Preço alto sem atratividade espanta clientes
 	var base_chance: float = g.enter_chance()
-	g.lvl.price = 5
+	g.set_price(13.0)
 	check(g.enter_chance() < base_chance, "preço alto reduz a chance de entrada")
-	g.lvl.price = 0
+	var high_chance: float = g.enter_chance()
+	g.lvl.comfort = 10
+	check(g.enter_chance() > high_chance, "segurança e conforto reduzem a rejeição ao preço")
+	g.lvl.comfort = 0
+	g.set_price(8.0)
+	g.set_price(0.1)
+	check(is_equal_approx(g.price(), g.MIN_PRICE), "preço tem mínimo")
+	g.set_price(8.0)
+	var bp: float = g.best_price()
+	check(g.expected_income_at(bp) >= g.expected_income_at(8.0), "preço ideal rende pelo menos o atual (%s)" % g.price_str(bp))
 	g.lvl.attract = 3
 	check(g.enter_chance() > base_chance, "atratividade aumenta a chance de entrada")
 	g.lvl.attract = 0
@@ -63,6 +72,23 @@ func _initialize() -> void:
 	check(g.buy_next_district(), "desbloqueia Vila Nova")
 	check(g.housing() > pop_before, "bairro aumenta a moradia")
 	check(g.district_income_mult() > 1.0, "bairro aumenta a receita")
+
+	# Pesquisa
+	g.money = 100000.0
+	var inc_before: float = g.income_mult()
+	check(g.start_research("digital"), "inicia pesquisa")
+	check(not g.start_research("marketing"), "só uma pesquisa por vez")
+	check(g.research_active(), "pesquisa ativa")
+	g.check_research(g.research_end - 1.0)
+	check(g.research_active(), "não termina antes do tempo")
+	g.check_research(g.research_end + 1.0)
+	check(not g.research_active() and g.rlvl("digital") == 1, "pesquisa conclui depois do tempo")
+	check(g.income_mult() > inc_before, "cobrança digital aumenta a receita")
+	check(g.research_cost("digital") > 2000.0, "pesquisa fica mais cara")
+	g.gems = 100
+	check(g.start_research("valet"), "inicia manobristas")
+	check(g.rush_research() and g.rlvl("valet") == 1, "acelera com gemas")
+	check(g.stay_factor() < 1.0, "manobristas diminuem o tempo de permanência")
 
 	# Moradores x empregos
 	g.lvl.city = 10
@@ -130,6 +156,8 @@ func _initialize() -> void:
 	check(g2.spots() == g.spots(), "save mantém vagas")
 	check(is_equal_approx(g2.population(), g.population()), "save mantém moradores")
 	check(g2.day == g.day, "save mantém o dia")
+	check(g2.rlvl("digital") == 1, "save mantém pesquisas")
+	check(is_equal_approx(g2.price(), g.price()), "save mantém o preço")
 	check(g2.districts_unlocked == g.districts_unlocked, "save mantém bairros")
 	check(g2.missions_claimed.has(0), "save mantém missões")
 	check(is_equal_approx(g2.money, g.money), "save mantém dinheiro")

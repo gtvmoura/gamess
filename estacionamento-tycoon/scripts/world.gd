@@ -651,7 +651,7 @@ func _on_car_parked(car) -> void:
 		_despawn(car)
 		return
 	Game.car_parked()
-	var base: float = Game.STAY_WORK_SECONDS if car.worker else Game.STAY_SHOP_SECONDS
+	var base: float = (Game.STAY_WORK_SECONDS if car.worker else Game.STAY_SHOP_SECONDS) * Game.stay_factor()
 	var stay := rng.randf_range(base * 0.7, base * 1.3)
 	get_tree().create_timer(stay).timeout.connect(_car_leave.bind(car))
 

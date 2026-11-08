@@ -31,7 +31,7 @@ func _world():
 
 func _tabs(prefix: String) -> void:
 	var ui = _ui()
-	for tab in ["upgrades", "city", "expansion", "missions"]:
+	for tab in ["upgrades", "city", "research", "expansion", "missions"]:
 		ui.open_tab(tab)
 		await _wait(1.0)
 		await _shot("%s_%s" % [prefix, tab])
@@ -59,8 +59,12 @@ func _run() -> void:
 	await _tabs("02_inicio")
 
 	# Cidade em crescimento
-	Game.lvl = {"spots": 6, "attract": 5, "price": 6, "fleet": 5, "city": 8, "jobs": 8}
+	Game.lvl = {"spots": 6, "attract": 5, "comfort": 4, "fleet": 5, "city": 8, "jobs": 8}
 	Game.hour = 12.5
+	Game.price_value = 14.0
+	Game.research_lvl = {"digital": 2, "marketing": 1}
+	Game.research_key = "valet"
+	Game.research_end = Time.get_unix_time_from_system() + 40.0
 	Game.districts_unlocked = 3
 	Game.money = 186450.0
 	Game.gems = 75
@@ -73,8 +77,10 @@ func _run() -> void:
 	await _tabs("04_crescimento")
 
 	# Metrópole
-	Game.lvl = {"spots": 18, "attract": 14, "price": 18, "fleet": 12, "city": 16, "jobs": 16}
+	Game.lvl = {"spots": 18, "attract": 14, "comfort": 12, "fleet": 12, "city": 16, "jobs": 16}
 	Game.hour = 17.6
+	Game.price_value = 26.0
+	Game.research_key = ""
 	Game.districts_unlocked = 6
 	Game.money = 48700000.0
 	Game.gems = 320

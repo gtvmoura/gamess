@@ -35,6 +35,7 @@ var refreshers: Array[Callable] = []
 var _refresh_acc := 0.0
 var top_inset := 0.0
 var fps_label: Label
+var price_slider: HSlider
 
 
 func _ready() -> void:
@@ -221,10 +222,12 @@ func _build_bottom_bar() -> void:
 	root.add_child(bar)
 	bottom_bar = bar
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
+	row.add_theme_constant_override("separation", 5)
 	bar.add_child(row)
-	for tab in [["Melhorias", "upgrades"], ["Cidade", "city"], ["Expansão", "expansion"], ["Missões", "missions"]]:
-		var b := _button(tab[0], _open_tab.bind(tab[1]), 21)
+	for tab in [["Melhorias", "upgrades"], ["Cidade", "city"], ["Pesquisa", "research"], ["Expansão", "expansion"], ["Missões", "missions"]]:
+		var b := _button(tab[0], _open_tab.bind(tab[1]), 18)
+		b.clip_text = true
+		b.custom_minimum_size = Vector2(60, 0)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.add_theme_stylebox_override("normal", _box(Color("2a4a8a"), 14, 6))
 		b.add_theme_stylebox_override("hover", _box(Color("3560a8"), 14, 6))
@@ -250,7 +253,7 @@ func _update_hud() -> void:
 	city_label.text = "%s  |  %s moradores  |  %s trabalhando" % [
 		Game.phase_name(), Game.int_str(Game.population()), Game.int_str(Game.employed())]
 	var claim := Game.claimable_missions()
-	missions_btn.text = "Missões (%d)" % claim if claim > 0 else "Missões"
+	missions_btn.text = "Missões %d" % claim if claim > 0 else "Missões"
 
 
 # ---------------------------------------------------------------- Janela
@@ -368,6 +371,9 @@ func _rebuild_window() -> void:
 		"missions":
 			window_title.text = "Missões"
 			_build_missions()
+		"research":
+			window_title.text = "Centro de Pesquisa"
+			_build_research()
 		"offline":
 			window_title.text = "Bem-vindo de volta!"
 			_build_offline()
@@ -417,20 +423,170 @@ func _hint(text: String) -> void:
 
 
 func _build_upgrades() -> void:
+	_build_price_card()
 	var s := Game.spots()
 	_upgrade_row("spots", "%d vagas" % s, "%d vagas" % (s + 5))
 	var a := Game.attract_level()
 	_upgrade_row("attract", "Nível %d" % a, "Nível %d" % (a + 1))
-	var p := Game.price()
-	_upgrade_row("price", Game.price_str(p), Game.price_str(p + 1.0))
-	var info := _label("", 18, C_MUTED)
+	_upgrade_row("comfort", "Rejeição %.2f" % Game.price_sensitivity(), "mais tolerância")
+	var info := _label("", 17, C_MUTED)
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	window_body.add_child(info)
 	var refresh := func():
-		info.text = "Preço justo para os motoristas: %s/h. Acima disso menos carros entram.\nCarros entrando: %.1f por minuto. Clientes perdidos (lotado): %s." % [
-			Game.price_str(Game.fair_price()), Game.arrivals_per_sec() * 60.0, Game.int_str(Game.lost_customers)]
+		info.text = "Carros entrando: %.1f por minuto. Clientes perdidos (lotado): %s." % [
+			Game.arrivals_per_sec() * 60.0, Game.int_str(Game.lost_customers)]
 	refresh.call()
 	refreshers.append(refresh)
+
+
+func _build_price_card() -> void:
+	var card := _card()
+	window_body.add_child(card)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	card.add_child(v)
+	var head := HBoxContainer.new()
+	var t := _label("Preço por hora", 24)
+	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(t)
+	var value := _label("", 30, C_GOLD)
+	head.add_child(value)
+	v.add_child(head)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var minus := _button("-", _nudge_price.bind(-1), 28)
+	minus.custom_minimum_size = Vector2(64, 56)
+	var slider := HSlider.new()
+	slider.min_value = Game.MIN_PRICE
+	slider.max_value = Game.MAX_PRICE
+	slider.step = 0.5
+	slider.exp_edit = true
+	slider.value = Game.price()
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	slider.custom_minimum_size = Vector2(0, 48)
+	slider.value_changed.connect(func(x): Game.set_price(x))
+	price_slider = slider
+	var plus := _button("+", _nudge_price.bind(1), 28)
+	plus.custom_minimum_size = Vector2(64, 56)
+	row.add_child(minus)
+	row.add_child(slider)
+	row.add_child(plus)
+	v.add_child(row)
+	var acc := _label("", 18)
+	v.add_child(acc)
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, 12)
+	bar.max_value = 1.0
+	v.add_child(bar)
+	var hint := _label("", 16, C_MUTED)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(hint)
+	var ideal_row := HBoxContainer.new()
+	var ideal := _label("", 18, C_GREEN_TEXT)
+	ideal.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ideal_row.add_child(ideal)
+	var use := _button("Usar ideal", _use_best_price, 18)
+	use.custom_minimum_size = Vector2(150, 50)
+	ideal_row.add_child(use)
+	v.add_child(ideal_row)
+	var best := [Game.best_price(), 0.0]
+	var refresh := func():
+		value.text = Game.price_str(Game.price())
+		var a := Game.price_acceptance()
+		acc.text = "Aceitação dos motoristas: %d%%" % int(round(minf(a, 1.0) * 100.0))
+		bar.value = minf(a, 1.0)
+		hint.text = "Preço justo: %s/h. Acima dele, menos carros entram (Segurança e Conforto e pesquisas reduzem a rejeição)." % Game.price_str(Game.fair_price())
+		best[1] += 0.2
+		if best[1] >= 2.0:
+			best[1] = 0.0
+			best[0] = Game.best_price()
+		ideal.text = "Preço ideal agora: %s/h" % Game.price_str(best[0])
+	refresh.call()
+	refreshers.append(refresh)
+
+
+func _nudge_price(dir: int) -> void:
+	var p := Game.price()
+	var step := 0.5 if p < 20.0 else (1.0 if p < 60.0 else 5.0)
+	Game.set_price(p + step * dir)
+	if is_instance_valid(price_slider):
+		price_slider.set_value_no_signal(Game.price())
+
+
+func _use_best_price() -> void:
+	Game.set_price(Game.best_price())
+	if is_instance_valid(price_slider):
+		price_slider.set_value_no_signal(Game.price())
+
+
+func _build_research() -> void:
+	var active := _card()
+	window_body.add_child(active)
+	var av := VBoxContainer.new()
+	active.add_child(av)
+	var a_title := _label("", 22, C_GOLD)
+	av.add_child(a_title)
+	var a_bar := ProgressBar.new()
+	a_bar.show_percentage = false
+	a_bar.custom_minimum_size = Vector2(0, 14)
+	a_bar.max_value = 1.0
+	av.add_child(a_bar)
+	var a_row := HBoxContainer.new()
+	var a_time := _label("", 18, C_MUTED)
+	a_time.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	a_row.add_child(a_time)
+	var rush := _button("", func(): _after_action(Game.rush_research()), 18)
+	rush.custom_minimum_size = Vector2(190, 50)
+	rush.add_theme_stylebox_override("normal", _box(Color("8a3fc0"), 14, 10))
+	a_row.add_child(rush)
+	av.add_child(a_row)
+	var was_active := [Game.research_active()]
+	var refresh_active := func():
+		if Game.research_active():
+			a_title.text = "Pesquisando: %s" % Game.RESEARCH[Game.research_key].name
+			a_bar.value = Game.research_progress()
+			a_time.text = "Falta " + Game.time_str(Game.research_left())
+			rush.visible = true
+			rush.text = "Concluir (%d gemas)" % Game.rush_cost()
+			rush.disabled = Game.gems < Game.rush_cost()
+		else:
+			a_title.text = "Nenhuma pesquisa em andamento"
+			a_bar.value = 0.0
+			a_time.text = "Escolha uma pesquisa abaixo."
+			rush.visible = false
+		if was_active[0] != Game.research_active():
+			was_active[0] = Game.research_active()
+			_rebuild_window.call_deferred()
+	refresh_active.call()
+	refreshers.append(refresh_active)
+	for key in Game.RESEARCH.keys():
+		var r: Dictionary = Game.RESEARCH[key]
+		var card := _card()
+		window_body.add_child(card)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		card.add_child(row)
+		var text := VBoxContainer.new()
+		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		text.add_child(_label("%s  (nível %d/%d)" % [r.name, Game.rlvl(key), int(r.max)], 21))
+		var desc := _label("%s\nDuração: %s" % [r.desc, Game.time_str(Game.research_time(key))], 16, C_MUTED)
+		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		text.add_child(desc)
+		row.add_child(text)
+		var btn := _button("", func(): _after_action(Game.start_research(key)), 18)
+		btn.custom_minimum_size = Vector2(160, 64)
+		row.add_child(btn)
+		var refresh := func():
+			if Game.research_maxed(key):
+				btn.text = "MÁXIMO"
+				btn.disabled = true
+			else:
+				btn.text = Game.money_str(Game.research_cost(key))
+				btn.disabled = not Game.can_start_research(key)
+		refresh.call()
+		refreshers.append(refresh)
 
 
 func _build_city() -> void:
