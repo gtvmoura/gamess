@@ -15,7 +15,8 @@ var world = null
 var rng := RandomNumberGenerator.new()
 var peds: Array = []          # cada um: Dictionary
 var open_blocks: Array = []   # quarteirões desbloqueados (Vector2i)
-var layers := {}              # "bx,by,f" -> Node2D (f = 0 atrás, 1 na frente)
+var layers := {}
+var crossing: Array = []      # posições de quem está atravessando a rua agora (carros esperam)              # "bx,by,f" -> Node2D (f = 0 atrás, 1 na frente)
 var _acc := 0.0
 var _t := 0.0
 
@@ -121,6 +122,9 @@ func _next_leg(p: Dictionary) -> void:
 				p.next_k = nk
 				p.to = _corner(nb, nk)
 				p.pos = here
+				# espera o sinal na esquina antes de atravessar
+				p.wait = true
+				p.along_x = absf((p.to as Vector2).x - here.x) > absf((p.to as Vector2).y - here.y)
 				return
 	p.to = _corner(b, int(p.k) + int(p.dir) + 4)
 
@@ -130,6 +134,11 @@ func _process(delta: float) -> void:
 		return
 	_t += delta
 	for p in peds:
+		if p.get("wait", false):
+			if world.ped_can_cross(bool(p.along_x)):
+				p.wait = false
+			else:
+				continue
 		var to: Vector2 = p.to
 		var pos: Vector2 = p.pos
 		var d := pos.distance_to(to)
@@ -140,6 +149,10 @@ func _process(delta: float) -> void:
 		else:
 			p.v = (to - pos) / d
 			p.pos = pos + p.v * step
+	crossing.clear()
+	for p in peds:
+		if p.cross and not p.get("wait", false):
+			crossing.append(p.pos)
 	_acc += delta
 	if _acc < 1.0 / REDRAW_HZ:
 		return

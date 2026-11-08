@@ -105,6 +105,10 @@ func _ready() -> void:
 	camera.make_current()
 	focus_lot(true)
 	spot_cars.resize(Game.spots())
+	signals = Node2D.new()
+	signals.position = Vector2(0, -100000)  # desenhado antes (y-sort), abaixo dos prédios
+	signals.draw.connect(_draw_signals)
+	objects.add_child(signals)
 	crowd = CrowdScript.new()
 	crowd.world = self
 	add_child(crowd)
@@ -311,7 +315,7 @@ func _flush_block(front: Vector2) -> void:
 	if not b.is_empty():
 		node.ops.append(["b", b])
 	objects.add_child(node)
-	_static_nodes.append(node)
+	_last_block_node = node
 
 
 # ---------------------------------------------------------------- Sprites (Kenney, CC0)
@@ -631,6 +635,7 @@ func _process(delta: float) -> void:
 		_try_arrival(false)
 	_update_daylight()
 	_process_pending(2)
+	_update_lights(delta)
 	_frame += 1
 	if _frame % 2 == 0:
 		_keep_distance()
@@ -733,6 +738,88 @@ func car_at(world_pos: Vector2):
 	return best
 
 
+# ---------------------------------------------------------------- Semáforos
+
+const LIGHT_CYCLE := 16.0
+var light_t := 0.0
+var _light_state := ""
+var signals: Node2D
+
+
+## Ruas horizontais (ao longo de x) com sinal verde para carros.
+func h_green() -> bool:
+	return light_t < 6.5
+
+
+func v_green() -> bool:
+	return light_t >= 8.0 and light_t < 14.5
+
+
+## Pedestre pode começar a atravessar uma rua vertical (andando em x) ou horizontal (em y).
+func ped_can_cross(along_x: bool) -> bool:
+	if along_x:
+		return light_t < 3.5
+	return light_t >= 8.0 and light_t < 11.5
+
+
+func _light_color(green: bool, t_end: float) -> Color:
+	if green:
+		return Color("ffd23f") if light_t > t_end - 1.5 else Color("3fe06a")
+	return Color("ff4a4a")
+
+
+func _update_lights(delta: float) -> void:
+	light_t = fmod(light_t + delta, LIGHT_CYCLE)
+	var st := "%s%s%s" % [h_green(), v_green(), light_t > 5.0 and light_t < 6.5 or light_t > 13.0 and light_t < 14.5]
+	if st != _light_state:
+		_light_state = st
+		signals.queue_redraw()
+
+
+func _draw_signals() -> void:
+	var b = Batch.new()
+	var hc := _light_color(h_green(), 6.5)
+	var vc := _light_color(v_green(), 14.5)
+	for cx in ROADS:
+		for cy in ROADS:
+			var kx: float = cx - 0.5
+			var ky: float = cy - 0.5
+			if LOT.has_point(Vector2(kx + 0.5, ky + 0.5)) or kx <= 0.0 or ky <= 0.0 or kx >= MAP - 1.0 or ky >= MAP - 1.0:
+				continue
+			# poste para quem anda em x (canto de baixo) e para quem anda em y (canto de cima)
+			for pole in [[Vector2(kx + 1.08, ky + 1.08), hc], [Vector2(kx - 0.08, ky - 0.08), vc]]:
+				var base := Iso.pg(pole[0], 2.6) - signals.position
+				b.draw_line(base, base - Vector2(0, 20), Color("2b2f36"), 2.0)
+				b.draw_colored_polygon(PackedVector2Array([base + Vector2(-3, -27), base + Vector2(3, -27), base + Vector2(3, -18), base + Vector2(-3, -18)]), Color("1b1e24"))
+				b.draw_circle(base - Vector2(0, 22.5), 2.3, pole[1])
+	b.flush(signals.get_canvas_item())
+
+
+## Para no sinal vermelho antes da faixa de pedestres.
+func _red_light_stop(g: Vector2, dir: Vector2) -> bool:
+	if LOT.grow(-0.2).has_point(g):
+		return false
+	if absf(dir.x) > 0.7:
+		if h_green():
+			return false
+		for c in ROADS:
+			var k: float = c - 0.5
+			if dir.x > 0.0 and g.x > k - 1.05 and g.x < k - 0.68:
+				return true
+			if dir.x < 0.0 and g.x < k + 2.05 and g.x > k + 1.68:
+				return true
+	elif absf(dir.y) > 0.7:
+		if v_green():
+			return false
+		for c in ROADS:
+			var k: float = c - 0.5
+			if dir.y > 0.0 and g.y > k - 1.05 and g.y < k - 0.68:
+				return true
+			if dir.y < 0.0 and g.y < k + 2.05 and g.y > k + 1.68:
+				return true
+	return false
+
+
 ## Carros mantêm distância do carro da frente na mesma faixa (sem se atravessar).
 func _keep_distance() -> void:
 	var cells := {}
@@ -745,6 +832,7 @@ func _keep_distance() -> void:
 		if not cells.has(key):
 			cells[key] = []
 		cells[key].append(c)
+	var crowd_crossing: Array = crowd.crossing if crowd else []
 	for c in moving:
 		var g: Vector2 = c.grid
 		var dir: Vector2 = c.dir
@@ -772,6 +860,16 @@ func _keep_distance() -> void:
 					blocked = true
 					break
 				if blocked:
+					break
+		if not blocked and c.visible:
+			blocked = _red_light_stop(g, dir)
+		# nunca passa por cima de pedestre atravessando
+		if not blocked:
+			for pp in crowd_crossing:
+				var dp: Vector2 = pp - g
+				var al := dp.dot(dir)
+				if al > 0.0 and al < 0.8 and absf(dp.x * dir.y - dp.y * dir.x) < 0.35:
+					blocked = true
 					break
 		c.hold = blocked
 
@@ -1214,6 +1312,10 @@ func _draw_ground(g) -> void:
 					Iso.quad(g, o, kx + 1.05, ky + q, 0.35, 0.09, 0, Color("f2f2f2"))
 				if ky + 1.4 < MAP:
 					Iso.quad(g, o, kx + q, ky + 1.05, 0.09, 0.35, 0, Color("f2f2f2"))
+				if kx - 0.4 > 0.0:
+					Iso.quad(g, o, kx - 0.4, ky + q, 0.35, 0.09, 0, Color("f2f2f2"))
+				if ky - 0.4 > 0.0:
+					Iso.quad(g, o, kx + q, ky - 0.4, 0.09, 0.35, 0, Color("f2f2f2"))
 	_draw_lot(g, o)
 
 
