@@ -52,8 +52,6 @@ func setup(rng: RandomNumberGenerator, start: Vector2) -> void:
 		kind = 5
 	else:
 		kind = 6
-	if rng.randf() < 0.06:
-		kind = 7  # moto
 	if kind == 2:
 		body_color = Color("f2c230") if rng.randf() < 0.5 else Color("3a8fd9")
 	elif kind == 6:

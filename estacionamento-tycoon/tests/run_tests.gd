@@ -15,7 +15,7 @@ func check(cond: bool, msg: String) -> void:
 
 func _initialize() -> void:
 	print("== Testes Estacionamento Tycoon ==")
-	for path in ["res://scripts/game_state.gd", "res://scripts/car.gd", "res://scripts/iso.gd", "res://scripts/batch.gd", "res://scripts/prop.gd", "res://scripts/walker.gd", "res://scripts/camera.gd"]:
+	for path in ["res://scripts/game_state.gd", "res://scripts/car.gd", "res://scripts/iso.gd", "res://scripts/batch.gd", "res://scripts/prop.gd", "res://scripts/walker.gd", "res://scripts/camera.gd", "res://scripts/crowd.gd", "res://scripts/block_mesh.gd"]:
 		var s = load(path)
 		check(s != null and s.can_instantiate(), "script compila: " + path)
 

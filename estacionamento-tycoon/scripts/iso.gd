@@ -34,17 +34,35 @@ static func prism(ci, o: Vector2, x0: float, y0: float, w: float, d: float, z0: 
 		return
 	var z1 := z0 + h
 	if h > 0.01:
-		ci.draw_colored_polygon(PackedVector2Array([
-			p(x0, y0 + d, z0) - o, p(x0 + w, y0 + d, z0) - o, p(x0 + w, y0 + d, z1) - o, p(x0, y0 + d, z1) - o]), color)
-		ci.draw_colored_polygon(PackedVector2Array([
-			p(x0 + w, y0, z0) - o, p(x0 + w, y0 + d, z0) - o, p(x0 + w, y0 + d, z1) - o, p(x0 + w, y0, z1) - o]), color.darkened(0.3))
+		var left := color
+		var right := color.darkened(0.3)
+		if h >= 6.0:
+			# degradê: base mais escura (oclusão), topo mais claro
+			var ao := clampf(h / 120.0, 0.12, 0.3)
+			ci.draw_polygon(PackedVector2Array([
+				p(x0, y0 + d, z0) - o, p(x0 + w, y0 + d, z0) - o, p(x0 + w, y0 + d, z1) - o, p(x0, y0 + d, z1) - o]),
+				PackedColorArray([left.darkened(ao), left.darkened(ao), left.lightened(0.04), left.lightened(0.04)]))
+			ci.draw_polygon(PackedVector2Array([
+				p(x0 + w, y0, z0) - o, p(x0 + w, y0 + d, z0) - o, p(x0 + w, y0 + d, z1) - o, p(x0 + w, y0, z1) - o]),
+				PackedColorArray([right.darkened(ao), right.darkened(ao), right.lightened(0.03), right.lightened(0.03)]))
+			# brilho nas quinas de cima
+			var hl := Color(1, 1, 1, 0.35)
+			ci.draw_line(p(x0, y0 + d, z1) - o, p(x0 + w, y0 + d, z1) - o, hl, 1.0)
+			ci.draw_line(p(x0 + w, y0 + d, z1) - o, p(x0 + w, y0, z1) - o, hl, 1.0)
+			ci.draw_line(p(x0 + w, y0 + d, z0) - o, p(x0 + w, y0 + d, z1) - o, Color(1, 1, 1, 0.12), 1.0)
+		else:
+			ci.draw_colored_polygon(PackedVector2Array([
+				p(x0, y0 + d, z0) - o, p(x0 + w, y0 + d, z0) - o, p(x0 + w, y0 + d, z1) - o, p(x0, y0 + d, z1) - o]), left)
+			ci.draw_colored_polygon(PackedVector2Array([
+				p(x0 + w, y0, z0) - o, p(x0 + w, y0 + d, z0) - o, p(x0 + w, y0 + d, z1) - o, p(x0 + w, y0, z1) - o]), right)
 	quad(ci, o, x0, y0, w, d, z1, top if top.a > 0.0 else color.lightened(0.2))
 
 
 ## Sombra projetada no chão (para baixo-direita).
 static func shadow(ci, o: Vector2, x0: float, y0: float, w: float, d: float, h: float) -> void:
 	var s := minf(h / 40.0, 3.0)
-	quad(ci, o, x0 + 0.1, y0 + 0.1, w + s * 0.5, d + s * 0.15, 0.0, Color(0, 0, 0, 0.22))
+	quad(ci, o, x0 + 0.05, y0 + 0.05, w + s * 0.6, d + s * 0.2, 0.0, Color(0, 0, 0, 0.1))
+	quad(ci, o, x0 + 0.1, y0 + 0.1, w + s * 0.4, d + s * 0.1, 0.0, Color(0, 0, 0, 0.14))
 
 
 ## Janelas numa face. Face "y" = frente-esquerda (y = y0+d), face "x" = frente-direita (x = x0+w).

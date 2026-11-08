@@ -9,6 +9,7 @@ const WalkerScript := preload("res://scripts/walker.gd")
 const CameraScript := preload("res://scripts/camera.gd")
 const Batch := preload("res://scripts/batch.gd")
 const BlockMesh := preload("res://scripts/block_mesh.gd")
+const CrowdScript := preload("res://scripts/crowd.gd")
 
 const MAP := 49.0                 # tamanho do mapa em casas
 const NB := 6                     # 6x6 quarteirões, ruas a cada 8 casas
@@ -53,6 +54,13 @@ var _fx_budget := 4.0
 var _city_key := ""
 var _ground_key := ""
 var _static_nodes: Array = []
+var _block_nodes := {}
+var _block_keys := {}
+var _pending_blocks: Array = []
+var _last_block_node = null
+var _lot_key := ""
+var _beach_built := false
+var crowd = null
 var _collect = null          # quando não é null, _prop() junta aqui em vez de criar nós
 var _entry_gate = null
 var _exit_gate = null
@@ -89,7 +97,11 @@ func _ready() -> void:
 	camera.make_current()
 	focus_lot(true)
 	spot_cars.resize(Game.spots())
+	crowd = CrowdScript.new()
+	crowd.world = self
+	add_child(crowd)
 	_rebuild()
+	_process_pending(999)
 	Game.changed.connect(_rebuild)
 	for i in 8:
 		_spawn_traffic()
@@ -195,18 +207,46 @@ func _rebuild() -> void:
 		_ground_key = gkey
 		queue_redraw()
 		overlay.queue_redraw()
-	var key := "%d|%d|%d|%d|%s|%s" % [int(_pop_level() * 8.0), Game.districts_unlocked, int(Game.lvl.attract), Game.spots() / 48, str(Game.services), str(Game.staff)]
-	if key == _city_key:
-		return
-	_city_key = key
-	for n in _static_nodes:
-		n.queue_free()
-	_static_nodes.clear()
-	var br := RandomNumberGenerator.new()
-	_build_city(br)
-	_build_lot_props()
-	_build_beach(br)
-	_build_walkers(br)
+	# quarteirões: só os que mudaram, alguns por quadro (evita travadas)
+	for b in block_district.keys():
+		var k := _block_key(b)
+		if _block_keys.get(b, "") != k:
+			_block_keys[b] = k
+			if not _pending_blocks.has(b):
+				_pending_blocks.append(b)
+	var lkey := "%d|%d|%s|%s|%d" % [int(Game.lvl.attract), Game.spots() / 48, str(Game.services), str(Game.staff), Game.phase_index()]
+	if lkey != _lot_key:
+		_lot_key = lkey
+		for n in _static_nodes:
+			if is_instance_valid(n):
+				n.queue_free()
+		_static_nodes.clear()
+		_build_lot_props()
+	if not _beach_built:
+		_beach_built = true
+		_build_beach(RandomNumberGenerator.new())
+	if crowd:
+		crowd.refresh_blocks()
+
+
+func _block_key(b: Vector2i) -> String:
+	var dist: int = block_district[b]
+	var locked := dist >= Game.districts_unlocked
+	if locked:
+		return "L"
+	return "%d|%d" % [int(_dev(dist) * 20.0), Game.phase_index()]
+
+
+## Reconstrói até `n` quarteirões pendentes por quadro.
+func _process_pending(n: int) -> void:
+	while n > 0 and not _pending_blocks.is_empty():
+		n -= 1
+		var b: Vector2i = _pending_blocks.pop_front()
+		var old = _block_nodes.get(b, null)
+		_build_block(b)
+		_block_nodes[b] = _last_block_node
+		if old != null and is_instance_valid(old):
+			old.queue_free()
 
 
 func _prop(kind: String, x: float, y: float, w: float = 0.0, d: float = 0.0):
@@ -299,82 +339,74 @@ func _tree(x: float, y: float, r: RandomNumberGenerator, palm: bool) -> void:
 	t.queue_redraw()
 
 
-func _build_city(br: RandomNumberGenerator) -> void:
+func _build_block(b: Vector2i) -> void:
+	var br := RandomNumberGenerator.new()
 	var phase := Game.phase_index()
 	var lit: float = [0.04, 0.12, 0.5][phase]
-	for b in block_district.keys():
-		var dist: int = block_district[b]
-		var locked: bool = dist >= Game.districts_unlocked
-		var ox: float = b.x * 8 + 1.0
-		var oy: float = b.y * 8 + 1.0
-		br.seed = hash(b) + 17
-		_collect = []
-		# palmeiras na calçada
-		if not locked:
-			_tree(ox + 0.15, oy + 0.15, br, true)
-			_tree(ox + 6.85, oy + 6.85, br, true)
-		for pi in 4:
-			var px := ox + 0.4 + (pi % 2) * 3.3
-			var py := oy + 0.4 + (pi / 2) * 3.3
-			var r := br.randf()
-			var r2 := br.randf()
-			var r3 := br.randf()
-			if locked:
-				for k in int(r2 * 4.0):
-					_tree(px + br.randf() * 2.8, py + br.randf() * 2.8, br, false)
-				continue
-			if dist == 3 or dist == 6:
-				var wh = _prop("warehouse", px + 0.1, py + 0.1, 2.7, 2.6)
-				wh.floors = 1 + int(r * 2.0)
-				wh.color = Color("c9ccd2") if r2 < 0.5 else Color("d9c9a8")
-				continue
-			var s := _dev(dist) + r * 0.5 - 0.15
-			if r3 < 0.12:
-				for k in 3 + int(r2 * 3.0):
-					_tree(px + br.randf() * 2.8, py + br.randf() * 2.8, br, dist == 4)
-			elif s < 0.3:
-				var hw := br.randf_range(1.5, 2.1)
-				var hx := px + br.randf_range(0.0, 2.9 - hw)
-				var hy := py + br.randf_range(0.0, 2.9 - hw)
-				var h = _prop("house", hx, hy, hw, hw * br.randf_range(0.8, 1.0))
-				h.floors = 2 if r2 > 0.7 else 1
-				h.color = Color(BUILDING_COLORS[br.randi_range(0, BUILDING_COLORS.size() - 1)])
-				h.color2 = Color(ROOF_COLORS[br.randi_range(0, ROOF_COLORS.size() - 1)])
-				h.seed_value = br.randi()
-				h.lit_chance = lit
-				if hx - px > 0.8:
-					_tree(px + 0.4, py + 2.5, br, dist == 4)
-				else:
-					_tree(px + 2.6, py + 0.4, br, dist == 4)
+	var dist: int = block_district[b]
+	var locked: bool = dist >= Game.districts_unlocked
+	var ox: float = b.x * 8 + 1.0
+	var oy: float = b.y * 8 + 1.0
+	br.seed = hash(b) + 17
+	_collect = []
+	# palmeiras na calçada
+	if not locked:
+		_tree(ox + 0.15, oy + 0.15, br, true)
+		_tree(ox + 6.85, oy + 6.85, br, true)
+	for pi in 4:
+		var px := ox + 0.4 + (pi % 2) * 3.3
+		var py := oy + 0.4 + (pi / 2) * 3.3
+		var r := br.randf()
+		var r2 := br.randf()
+		var r3 := br.randf()
+		if locked:
+			for k in int(r2 * 4.0):
+				_tree(px + br.randf() * 2.8, py + br.randf() * 2.8, br, false)
+			continue
+		if dist == 3 or dist == 6:
+			var wh = _prop("warehouse", px + 0.1, py + 0.1, 2.7, 2.6)
+			wh.floors = 1 + int(r * 2.0)
+			wh.color = Color("c9ccd2") if r2 < 0.5 else Color("d9c9a8")
+			continue
+		var s := _dev(dist) + r * 0.5 - 0.15
+		if r3 < 0.12:
+			for k in 3 + int(r2 * 3.0):
+				_tree(px + br.randf() * 2.8, py + br.randf() * 2.8, br, dist == 4)
+		elif s < 0.3:
+			var hw := br.randf_range(1.5, 2.1)
+			var hx := px + br.randf_range(0.0, 2.9 - hw)
+			var hy := py + br.randf_range(0.0, 2.9 - hw)
+			var h = _prop("house", hx, hy, hw, hw * br.randf_range(0.8, 1.0))
+			h.floors = 2 if r2 > 0.7 else 1
+			h.color = Color(BUILDING_COLORS[br.randi_range(0, BUILDING_COLORS.size() - 1)])
+			h.color2 = Color(ROOF_COLORS[br.randi_range(0, ROOF_COLORS.size() - 1)])
+			h.seed_value = br.randi()
+			h.lit_chance = lit
+			if hx - px > 0.8:
+				_tree(px + 0.4, py + 2.5, br, dist == 4)
 			else:
-				var tower := s >= 1.0 and phase >= 2
-				var floors := 0
-				if s < 0.65:
-					floors = 2 + int((s - 0.3) * 14.0)
-				elif not tower:
-					floors = mini(6 + int((s - 0.65) * 16.0), 12)
-				else:
-					floors = mini(12 + int((s - 1.0) * 24.0), 26)
-				# quarteirões na frente do estacionamento (mais perto da câmera) ficam baixos
-				if _in_front_of_lot(b):
-					tower = false
-					floors = mini(floors, 4)
-				var bw := 2.4 if tower else 2.7
-				# prédios pequenos/médios: modelos da Kenney (variedade), o resto procedural
-				if not tower and floors <= 7 and r2 < 0.7:
-					var model := "building-small-a" if floors <= 2 else ("building-small-b" if floors <= 4 else "building-small-c")
-					if floors <= 2 and br.randf() < 0.5:
-						model = "building-small-d"
-					var kb = _kenney_building(model, br.randi_range(0, 3) * 90, px + 0.1, py + 0.1, 2.7)
-					if kb != null:
-						continue
-				var bld = _prop("tower" if tower else "building", px + (2.9 - bw) / 2.0, py + (2.9 - bw) / 2.0, bw, bw)
-				bld.floors = maxi(2, floors)
-				var pal: Array = TOWER_COLORS if tower else BUILDING_COLORS
-				bld.color = Color(pal[br.randi_range(0, pal.size() - 1)])
-				bld.seed_value = br.randi()
-				bld.lit_chance = lit
-		_flush_block(Vector2(ox + 7.0, oy + 7.0))
+				_tree(px + 2.6, py + 0.4, br, dist == 4)
+		else:
+			var tower := s >= 1.0 and phase >= 2
+			var floors := 0
+			if s < 0.65:
+				floors = 2 + int((s - 0.3) * 14.0)
+			elif not tower:
+				floors = mini(6 + int((s - 0.65) * 16.0), 12)
+			else:
+				floors = mini(12 + int((s - 1.0) * 24.0), 26)
+			# quarteirões na frente do estacionamento (mais perto da câmera) ficam baixos
+			if _in_front_of_lot(b):
+				tower = false
+				floors = mini(floors, 4)
+			var bw := 2.4 if tower else 2.7
+			var bld = _prop("tower" if tower else "building", px + (2.9 - bw) / 2.0, py + (2.9 - bw) / 2.0, bw, bw)
+			bld.floors = maxi(2, floors)
+			var pal: Array = TOWER_COLORS if tower else BUILDING_COLORS
+			bld.color = Color(pal[br.randi_range(0, pal.size() - 1)])
+			bld.seed_value = br.randi()
+			bld.lit_chance = lit
+	_flush_block(Vector2(ox + 7.0, oy + 7.0))
 
 
 func _build_lot_props() -> void:
@@ -487,6 +519,8 @@ func _fence_seg(x: float, y: float, w: float, d: float, back: bool) -> void:
 
 func _build_beach(br: RandomNumberGenerator) -> void:
 	br.seed = 99
+	var keep := _static_nodes
+	_static_nodes = []
 	for i in 40:
 		var t := br.randf() * MAP
 		var side := br.randi_range(0, 3)
@@ -501,40 +535,7 @@ func _build_beach(br: RandomNumberGenerator) -> void:
 		else:
 			var u = _prop("umbrella", pos.x, pos.y)
 			u.color = Color.from_hsv(br.randf(), 0.75, 0.95)
-
-
-func _build_walkers(br: RandomNumberGenerator) -> void:
-	br.seed = 4242 + Game.districts_unlocked
-	var count := clampi(int(Game.population() / 400.0), 8, 70)
-	var blocks: Array = []
-	for b in block_district.keys():
-		if block_district[b] < Game.districts_unlocked:
-			blocks.append(b)
-	if blocks.is_empty():
-		return
-	for i in count:
-		var b: Vector2i = blocks[br.randi_range(0, blocks.size() - 1)]
-		var ox: float = b.x * 8 + 1.0
-		var oy: float = b.y * 8 + 1.0
-		var p0: Vector2
-		var p1: Vector2
-		match br.randi_range(0, 3):
-			0:
-				p0 = Vector2(ox + 0.2, oy + 0.15)
-				p1 = Vector2(ox + 6.8, oy + 0.15)
-			1:
-				p0 = Vector2(ox + 0.2, oy + 6.85)
-				p1 = Vector2(ox + 6.8, oy + 6.85)
-			2:
-				p0 = Vector2(ox + 0.15, oy + 0.2)
-				p1 = Vector2(ox + 0.15, oy + 6.8)
-			_:
-				p0 = Vector2(ox + 6.85, oy + 0.2)
-				p1 = Vector2(ox + 6.85, oy + 6.8)
-		var wk = WalkerScript.new()
-		wk.setup(br, p0, p1)
-		objects.add_child(wk)
-		_static_nodes.append(wk)
+	_static_nodes = keep
 
 
 # ---------------------------------------------------------------- Vagas
@@ -563,6 +564,7 @@ func _process(delta: float) -> void:
 		shop_acc -= 1.0
 		_try_arrival(false)
 	_update_daylight()
+	_process_pending(2)
 	_update_gates(delta)
 	# carros que passam na frente do estacionamento sem entrar
 	_passer_acc += minf(Game.passing_per_sec() * (1.0 - Game.enter_chance()), 1.0) * delta
@@ -698,7 +700,7 @@ func _free_spot() -> int:
 	return free[rng.randi_range(0, mini(free.size() - 1, 5))]
 
 
-const VEHICLE_SPRITES := {1: ["vehicle-truck-red", "vehicle-truck-yellow", "vehicle-truck-green"], 4: ["vehicle-truck-purple"], 7: ["vehicle-motorcycle"]}
+const VEHICLE_SPRITES := {}  # sprites da Kenney desativados (estilo próprio)
 var _frames_cache := {}
 
 
@@ -855,9 +857,29 @@ func _on_car_parked(car) -> void:
 		return
 	Game.car_parked()
 	car.status = "Estacionado"
+	_driver_walks(car)
 	var base: float = (Game.STAY_WORK_SECONDS if car.worker else Game.STAY_SHOP_SECONDS) * Game.stay_factor()
 	var stay := rng.randf_range(base * 0.7, base * 1.3)
 	get_tree().create_timer(stay).timeout.connect(_car_leave.bind(car))
+
+
+## O motorista desce do carro e caminha até a calçada.
+var _drivers := 0
+
+
+func _driver_walks(car) -> void:
+	if _drivers >= 8 or camera.zoom.x < 0.45:
+		return
+	_drivers += 1
+	var c: Vector2 = car.grid
+	var aisle := spot_aisle(car.spot_index)
+	var side := 0.18 if rng.randf() < 0.5 else -0.18
+	var pts: Array = [c + Vector2(side, 0), Vector2(c.x + side, aisle), Vector2(25.35, aisle), Vector2(25.35, TOP_AISLE_Y),
+		Vector2(25.35, LOT.position.y - 0.1), Vector2(25.35, 15.84), Vector2(rng.randf_range(26.0, 31.5), 15.84)]
+	var wk = WalkerScript.new()
+	wk.setup_path(rng, pts)
+	objects.add_child(wk)
+	wk.tree_exited.connect(func(): _drivers -= 1)
 
 
 func _car_leave(car) -> void:
@@ -933,32 +955,45 @@ func _draw_ground(g) -> void:
 	Iso.quad(g, o, -2.2, -2.2, MAP + 4.4, 0.25, 0, Color("f7ead0"))
 	Iso.quad(g, o, -2.2, -2.2, 0.25, MAP + 4.4, 0, Color("f7ead0"))
 	Iso.quad(g, o, -0.3, -0.3, MAP + 0.6, MAP + 0.6, 0, Color("4fae4a"))
+	var gn := RandomNumberGenerator.new()
+	gn.seed = 11
 	for x in int(MAP):
 		for y in int(MAP):
-			if (x + y) % 2 == 0:
-				Iso.quad(g, o, x, y, 1, 1, 0, Color("55b54f"))
+			var v := gn.randf_range(-0.035, 0.035)
+			Iso.quad(g, o, x, y, 1, 1, 0, Color("51b14c").lightened(v) if v > 0.0 else Color("51b14c").darkened(-v))
 	# quarteirões
 	for b in block_district.keys():
 		var dist: int = block_district[b]
 		var locked: bool = dist >= Game.districts_unlocked
 		var ox: float = b.x * 8 + 1.0
 		var oy: float = b.y * 8 + 1.0
-		Iso.quad(g, o, ox, oy, 7, 7, 0, Color("d4cdbd"))
+		# calçada elevada com meio-fio
+		Iso.prism(g, o, ox, oy, 7, 7, 0.0, 2.5, Color("bfb7a6"), Color("d8d1c1"))
+		for t in range(1, 7):
+			Iso.quad(g, o, ox + t, oy, 0.03, 0.3, 2.6, Color(0, 0, 0, 0.06))
+			Iso.quad(g, o, ox, oy + t, 0.3, 0.03, 2.6, Color(0, 0, 0, 0.06))
 		var inner := Color("5fb85a")
 		if locked:
 			inner = Color("7a9a55")
 		elif dist == 3 or dist == 6:
 			inner = Color("a8a69c")
-		Iso.quad(g, o, ox + 0.3, oy + 0.3, 6.4, 6.4, 0, inner)
+		Iso.quad(g, o, ox + 0.3, oy + 0.3, 6.4, 6.4, 2.6, inner)
 		if not locked and dist != 3 and dist != 6:
-			Iso.quad(g, o, ox + 3.25, oy + 0.3, 0.5, 6.4, 0, Color("d4cdbd"))
-			Iso.quad(g, o, ox + 0.3, oy + 3.25, 6.4, 0.5, 0, Color("d4cdbd"))
+			Iso.quad(g, o, ox + 3.25, oy + 0.3, 0.5, 6.4, 2.6, Color("d8d1c1"))
+			Iso.quad(g, o, ox + 0.3, oy + 3.25, 6.4, 0.5, 2.6, Color("d8d1c1"))
 	# ruas
 	var road := Color("4a4d55")
 	for c in ROADS:
 		var k: float = c - 0.5
 		Iso.quad(g, o, 0, k, MAP, 1, 0, road)
 		Iso.quad(g, o, k, 0, 1, MAP, 0, road)
+	# linhas de borda das ruas
+	for c in ROADS:
+		var k: float = c - 0.5
+		Iso.quad(g, o, 0, k + 0.06, MAP, 0.025, 0, Color(1, 1, 1, 0.35))
+		Iso.quad(g, o, 0, k + 0.915, MAP, 0.025, 0, Color(1, 1, 1, 0.35))
+		Iso.quad(g, o, k + 0.06, 0, 0.025, MAP, 0, Color(1, 1, 1, 0.35))
+		Iso.quad(g, o, k + 0.915, 0, 0.025, MAP, 0, Color(1, 1, 1, 0.35))
 	for c in ROADS:
 		var k: float = c - 0.5
 		for t in int(MAP):

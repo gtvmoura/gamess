@@ -12,6 +12,7 @@ var skin := Color("e0b48a")
 var _forward := true
 var _step := 0.0
 var _leg_up := false
+var path: Array = []   # modo "caminho": segue os pontos e some no final
 
 
 func setup(rng: RandomNumberGenerator, p0: Vector2, p1: Vector2) -> void:
@@ -24,7 +25,34 @@ func setup(rng: RandomNumberGenerator, p0: Vector2, p1: Vector2) -> void:
 	_forward = rng.randf() < 0.5
 
 
+func setup_path(rng: RandomNumberGenerator, points: Array) -> void:
+	setup(rng, points[0], points[0])
+	path = points.slice(1)
+	position = Iso.pg(points[0])
+	a = points[0]
+
+
 func _process(delta: float) -> void:
+	if not path.is_empty():
+		var to: Vector2 = path[0]
+		var d := a.distance_to(to)
+		var step := 0.55 * delta
+		if d <= step:
+			a = to
+			path.remove_at(0)
+			if path.is_empty():
+				var tw := create_tween()
+				tw.tween_property(self, "modulate:a", 0.0, 0.5)
+				tw.tween_callback(queue_free)
+		else:
+			a += (to - a) / d * step
+		position = Iso.pg(a)
+		_step += delta * 8.0
+		var upp := sin(_step) > 0.0
+		if upp != _leg_up:
+			_leg_up = upp
+			queue_redraw()
+		return
 	t += (speed if _forward else -speed) * delta
 	if t >= 1.0:
 		t = 1.0

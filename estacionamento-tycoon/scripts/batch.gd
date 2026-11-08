@@ -22,6 +22,20 @@ func draw_colored_polygon(poly: PackedVector2Array, color: Color) -> void:
 		idx.append(base + i + 1)
 
 
+## Polígono convexo com uma cor por vértice (degradês).
+func draw_polygon(poly: PackedVector2Array, colors: PackedColorArray) -> void:
+	var n := poly.size()
+	if n < 3 or colors.size() != n:
+		return
+	var base := pts.size()
+	pts.append_array(poly)
+	cols.append_array(colors)
+	for i in range(1, n - 1):
+		idx.append(base)
+		idx.append(base + i)
+		idx.append(base + i + 1)
+
+
 func draw_line(a: Vector2, b: Vector2, color: Color, width: float = 1.0) -> void:
 	var d := b - a
 	if d.length() < 0.001:
