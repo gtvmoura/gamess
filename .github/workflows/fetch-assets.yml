@@ -1,5 +1,8 @@
 name: Buscar assets grátis (Kenney, CC0)
 
+# Clona os Starter Kits públicos da Kenney no GitHub (assets CC0) e publica
+# a lista de arquivos, os sons e os modelos na branch "assets-raw" para escolha.
+
 on:
   push:
     branches: [main]
@@ -13,45 +16,29 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - name: Listar e baixar pacotes
+      - name: Clonar starter kits da Kenney
         run: |
-          mkdir -p out/previews out/lists out/audio
-          curl -sL https://kenney.nl/sitemap.xml -o sitemap.xml || true
-          grep -o 'https://kenney.nl/assets/[a-z0-9-]*' sitemap.xml | sort -u > out/all_assets.txt || true
-          wc -l out/all_assets.txt
-          grep -E 'isometric|car|vehicle|city|road|traffic|town|urban|sound|audio|interface|ui-|font|casino|impact|ambience|pixel-vehicle|racing' out/all_assets.txt > out/candidates.txt || true
-          cat out/candidates.txt
-          while read url; do
-            slug=$(basename "$url")
-            page=$(curl -sL "$url")
-            zip=$(echo "$page" | grep -oE 'https://kenney.nl/media/pages/assets/[^"]+\.zip' | head -1)
-            img=$(echo "$page" | grep -oE 'https://kenney.nl/media/pages/assets/[^"]+\.(png|jpg)' | head -3)
-            i=0
-            for u in $img; do i=$((i+1)); curl -sL "$u" -o "out/previews/${slug}_$i.${u##*.}"; done
-            if [ -n "$zip" ]; then
-              curl -sL "$zip" -o "/tmp/$slug.zip"
-              size=$(stat -c %s "/tmp/$slug.zip")
-              echo "$slug $size $zip" >> out/zips.txt
-              unzip -l "/tmp/$slug.zip" > "out/lists/$slug.txt" || true
-              case "$slug" in
-                *sound*|*audio*|*casino*|*impact*|*ambience*)
-                  mkdir -p "out/audio/$slug"
-                  unzip -q -o "/tmp/$slug.zip" '*.ogg' -d "out/audio/$slug" || true ;;
-              esac
-              unzip -q -o "/tmp/$slug.zip" 'Preview*' 'preview*' 'Sample*' 'sample*' -d "out/previews/$slug" 2>/dev/null || true
-              mkdir -p out/packs
-              cp "/tmp/$slug.zip" "out/packs/$slug.zip" 2>/dev/null || true
+          mkdir -p out src
+          for repo in Starter-Kit-City-Builder Starter-Kit-Racing Starter-Kit-3D-Platformer Starter-Kit-FPS Starter-Kit-Basic-Scene; do
+            if git clone -q --depth 1 "https://github.com/KenneyNL/$repo" "src/$repo"; then
+              echo "ok $repo"
+              (cd "src/$repo" && find . -type f -not -path './.git/*' | sort) > "out/$repo.files.txt"
+              cp "src/$repo"/LICENSE* "out/$repo.LICENSE.txt" 2>/dev/null || true
+              cp "src/$repo"/README* "out/$repo.README.md" 2>/dev/null || true
+              mkdir -p "out/$repo"
+              # modelos, sons, texturas e imagens (sem .import / cenas)
+              (cd "src/$repo" && find . -type f \( -iname '*.glb' -o -iname '*.gltf' -o -iname '*.bin' -o -iname '*.ogg' -o -iname '*.wav' -o -iname '*.mp3' -o -iname '*.png' -o -iname '*.ttf' \) -not -path './.git/*' -size -8M -exec cp --parents {} "../../out/$repo/" \;)
+            else
+              echo "falhou $repo"
             fi
-          done < out/candidates.txt
+          done
           du -sh out/*
       - name: Publicar na branch "assets-raw"
         run: |
           cd out
-          # pacotes grandes demais não vão para o git
-          find packs -size +45M -delete 2>/dev/null || true
           git init -q -b assets-raw
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git add -A
-          git commit -qm "Assets brutos da Kenney (CC0) para escolha"
+          git commit -qm "Assets dos Starter Kits da Kenney (CC0) para escolha"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" assets-raw
