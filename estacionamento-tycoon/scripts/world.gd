@@ -7,6 +7,8 @@ const CarScript := preload("res://scripts/car.gd")
 const PropScript := preload("res://scripts/prop.gd")
 const WalkerScript := preload("res://scripts/walker.gd")
 const CameraScript := preload("res://scripts/camera.gd")
+const Batch := preload("res://scripts/batch.gd")
+const BlockMesh := preload("res://scripts/block_mesh.gd")
 
 const MAP := 49.0                 # tamanho do mapa em casas
 const NB := 6                     # 6x6 quarteirões, ruas a cada 8 casas
@@ -45,6 +47,12 @@ var _fx_budget := 4.0
 var _city_key := ""
 var _ground_key := ""
 var _static_nodes: Array = []
+var _collect = null          # quando não é null, _prop() junta aqui em vez de criar nós
+var _entry_gate = null
+var _exit_gate = null
+var _entering: Array = []
+var _leaving: Array = []
+var _passer_acc := 0.0
 
 
 func _ready() -> void:
@@ -194,9 +202,27 @@ func _rebuild() -> void:
 func _prop(kind: String, x: float, y: float, w: float = 0.0, d: float = 0.0):
 	var p = PropScript.new()
 	p.setup(kind, x, y, w, d)
+	if _collect != null:
+		_collect.append(p)
+		return p
 	objects.add_child(p)
 	_static_nodes.append(p)
 	return p
+
+
+## Junta todos os objetos coletados num único nó (um comando de desenho).
+func _flush_block(front: Vector2) -> void:
+	var node = BlockMesh.new()
+	node.position = Iso.pg(front)
+	var b = Batch.new()
+	_collect.sort_custom(func(a, c): return a.position.y < c.position.y)
+	for p in _collect:
+		p.draw_into(b, node.position)
+		p.free()
+	_collect = null
+	node.batch = b
+	objects.add_child(node)
+	_static_nodes.append(node)
 
 
 func _tree(x: float, y: float, r: RandomNumberGenerator, palm: bool) -> void:
@@ -215,6 +241,7 @@ func _build_city(br: RandomNumberGenerator) -> void:
 		var ox: float = b.x * 8 + 1.0
 		var oy: float = b.y * 8 + 1.0
 		br.seed = hash(b) + 17
+		_collect = []
 		# palmeiras na calçada
 		if not locked:
 			_tree(ox + 0.15, oy + 0.15, br, true)
@@ -272,13 +299,15 @@ func _build_city(br: RandomNumberGenerator) -> void:
 				bld.color = Color(pal[br.randi_range(0, pal.size() - 1)])
 				bld.seed_value = br.randi()
 				bld.lit_chance = lit
+		_flush_block(Vector2(ox + 7.0, oy + 7.0))
 
 
 func _build_lot_props() -> void:
 	var a := int(Game.lvl.attract)
 	var units := ceili(float(Game.spots()) / (SPOTS_PER_ROW * 2))
-	var booth = _prop("booth", ENTRY_X - 1.0, LOT.position.y + 0.05, 0.5, 0.4)
-	booth.queue_redraw()
+	_prop("booth", ENTRY_X - 1.0, LOT.position.y + 0.05, 0.5, 0.4)
+	_entry_gate = _prop("gate", ENTRY_X - 0.45, LOT.position.y + 0.12, 0.9, 0.0)
+	_exit_gate = _prop("gate", EXIT_X - 0.45, LOT.position.y + 0.12, 0.9, 0.0)
 	if a >= 3:
 		var k = _prop("kiosk", LOT.position.x + 0.05, LOT.position.y + 0.05, 0.9, 0.85)
 		k.color = Color("f2efe6")
@@ -394,8 +423,14 @@ func _process(delta: float) -> void:
 		shop_acc -= 1.0
 		_try_arrival(false)
 	_update_daylight()
+	_update_gates(delta)
+	# carros que passam na frente do estacionamento sem entrar
+	_passer_acc += minf(Game.passing_per_sec() * (1.0 - Game.enter_chance()), 1.0) * delta
+	if _passer_acc >= 1.0:
+		_passer_acc = 0.0
+		_spawn_passer()
 	_traffic_timer += delta
-	var target := clampi(int(Game.passing_per_sec() * 5.0), 6, 45)
+	var target := clampi(int(Game.passing_per_sec() * 3.0), 4, 22)
 	if _traffic_timer >= 0.35 and traffic_count < target:
 		_traffic_timer = 0.0
 		_spawn_traffic()
@@ -405,6 +440,38 @@ func _process(delta: float) -> void:
 		if c != null:
 			n += 1
 	Game.occupied = n
+
+
+func _update_gates(delta: float) -> void:
+	_entering = _entering.filter(func(c): return is_instance_valid(c) and c.is_processing())
+	_leaving = _leaving.filter(func(c): return is_instance_valid(c) and c.is_processing())
+	_move_gate(_entry_gate, _entering, Vector2(ENTRY_X, LOT.position.y), delta)
+	_move_gate(_exit_gate, _leaving, Vector2(EXIT_X, LOT.position.y), delta)
+
+
+func _move_gate(gate, cars: Array, at: Vector2, delta: float) -> void:
+	if gate == null or not is_instance_valid(gate):
+		return
+	var near := false
+	for c in cars:
+		if (c.grid as Vector2).distance_to(at) < 1.3:
+			near = true
+			break
+	var target := 1.0 if near else 0.0
+	var v := move_toward(gate.open, target, delta * 3.0)
+	if not is_equal_approx(v, gate.open):
+		gate.open = v
+		gate.queue_redraw()
+
+
+func _spawn_passer() -> void:
+	var pts: Array = [Vector2(0.5, 16.5), Vector2(MAP - 0.5, 16.5)]
+	if rng.randf() < 0.5:
+		pts.reverse()
+	var route := _lane(pts)
+	var car = _new_car(route[0])
+	car.arrived.connect(_despawn.bind(car), CONNECT_ONE_SHOT)
+	car.go(route.slice(1), ROAD_SPEED * rng.randf_range(0.9, 1.1))
 
 
 func _try_arrival(worker: bool) -> void:
@@ -575,6 +642,7 @@ func _spawn_arrival(idx: int, worker: bool) -> void:
 		Vector2(LEFT_LANE_X, aisle), Vector2(c.x, aisle), c])
 	car.arrived.connect(_on_car_parked.bind(car), CONNECT_ONE_SHOT)
 	car.go(pts, ROAD_SPEED)
+	_entering.append(car)
 
 
 func _on_car_parked(car) -> void:
@@ -605,6 +673,7 @@ func _car_leave(car) -> void:
 	car.spot_index = -1
 	car.arrived.connect(_despawn.bind(car), CONNECT_ONE_SHOT)
 	car.go(pts, LOT_SPEED)
+	_leaving.append(car)
 
 
 func _floating_text(text: String, pos: Vector2) -> void:
@@ -629,9 +698,15 @@ func _floating_text(text: String, pos: Vector2) -> void:
 # ---------------------------------------------------------------- Chão
 
 func _draw() -> void:
+	var g = Batch.new()
+	_draw_ground(g)
+	g.flush(get_canvas_item())
+
+
+func _draw_ground(g) -> void:
 	var o := Vector2.ZERO
 	# mar com ondinhas
-	Iso.quad(self, o, -70, -70, MAP + 140, MAP + 140, 0, Color("1e9fb4"))
+	Iso.quad(g, o, -70, -70, MAP + 140, MAP + 140, 0, Color("1e9fb4"))
 	var wr := RandomNumberGenerator.new()
 	wr.seed = 7
 	for i in 500:
@@ -639,45 +714,45 @@ func _draw() -> void:
 		var y := wr.randf_range(-40, MAP + 40)
 		if x > -3 and x < MAP + 3 and y > -3 and y < MAP + 3:
 			continue
-		Iso.quad(self, o, x, y, 0.7, 0.1, 0, Color(1, 1, 1, 0.22))
+		Iso.quad(g, o, x, y, 0.7, 0.1, 0, Color(1, 1, 1, 0.22))
 	# areia e grama
-	Iso.quad(self, o, -2.2, -2.2, MAP + 4.4, MAP + 4.4, 0, Color("ecd79c"))
-	Iso.quad(self, o, -2.2, -2.2, MAP + 4.4, 0.25, 0, Color("f7ead0"))
-	Iso.quad(self, o, -2.2, -2.2, 0.25, MAP + 4.4, 0, Color("f7ead0"))
-	Iso.quad(self, o, -0.3, -0.3, MAP + 0.6, MAP + 0.6, 0, Color("4fae4a"))
+	Iso.quad(g, o, -2.2, -2.2, MAP + 4.4, MAP + 4.4, 0, Color("ecd79c"))
+	Iso.quad(g, o, -2.2, -2.2, MAP + 4.4, 0.25, 0, Color("f7ead0"))
+	Iso.quad(g, o, -2.2, -2.2, 0.25, MAP + 4.4, 0, Color("f7ead0"))
+	Iso.quad(g, o, -0.3, -0.3, MAP + 0.6, MAP + 0.6, 0, Color("4fae4a"))
 	for x in int(MAP):
 		for y in int(MAP):
 			if (x + y) % 2 == 0:
-				Iso.quad(self, o, x, y, 1, 1, 0, Color("55b54f"))
+				Iso.quad(g, o, x, y, 1, 1, 0, Color("55b54f"))
 	# quarteirões
 	for b in block_district.keys():
 		var dist: int = block_district[b]
 		var locked: bool = dist >= Game.districts_unlocked
 		var ox: float = b.x * 8 + 1.0
 		var oy: float = b.y * 8 + 1.0
-		Iso.quad(self, o, ox, oy, 7, 7, 0, Color("d4cdbd"))
+		Iso.quad(g, o, ox, oy, 7, 7, 0, Color("d4cdbd"))
 		var inner := Color("5fb85a")
 		if locked:
 			inner = Color("7a9a55")
 		elif dist == 3 or dist == 6:
 			inner = Color("a8a69c")
-		Iso.quad(self, o, ox + 0.3, oy + 0.3, 6.4, 6.4, 0, inner)
+		Iso.quad(g, o, ox + 0.3, oy + 0.3, 6.4, 6.4, 0, inner)
 		if not locked and dist != 3 and dist != 6:
-			Iso.quad(self, o, ox + 3.25, oy + 0.3, 0.5, 6.4, 0, Color("d4cdbd"))
-			Iso.quad(self, o, ox + 0.3, oy + 3.25, 6.4, 0.5, 0, Color("d4cdbd"))
+			Iso.quad(g, o, ox + 3.25, oy + 0.3, 0.5, 6.4, 0, Color("d4cdbd"))
+			Iso.quad(g, o, ox + 0.3, oy + 3.25, 6.4, 0.5, 0, Color("d4cdbd"))
 	# ruas
 	var road := Color("4a4d55")
 	for c in ROADS:
 		var k: float = c - 0.5
-		Iso.quad(self, o, 0, k, MAP, 1, 0, road)
-		Iso.quad(self, o, k, 0, 1, MAP, 0, road)
+		Iso.quad(g, o, 0, k, MAP, 1, 0, road)
+		Iso.quad(g, o, k, 0, 1, MAP, 0, road)
 	for c in ROADS:
 		var k: float = c - 0.5
 		for t in int(MAP):
 			if t % 8 == 0:
 				continue
-			Iso.quad(self, o, t + 0.25, k + 0.47, 0.45, 0.06, 0, Color(1, 1, 1, 0.75))
-			Iso.quad(self, o, k + 0.47, t + 0.25, 0.06, 0.45, 0, Color(1, 1, 1, 0.75))
+			Iso.quad(g, o, t + 0.25, k + 0.47, 0.45, 0.06, 0, Color(1, 1, 1, 0.75))
+			Iso.quad(g, o, k + 0.47, t + 0.25, 0.06, 0.45, 0, Color(1, 1, 1, 0.75))
 	# faixas de pedestre
 	for cx in ROADS:
 		for cy in ROADS:
@@ -686,42 +761,42 @@ func _draw() -> void:
 			for s in 5:
 				var q := 0.1 + s * 0.17
 				if kx + 1.4 < MAP:
-					Iso.quad(self, o, kx + 1.05, ky + q, 0.35, 0.09, 0, Color("f2f2f2"))
+					Iso.quad(g, o, kx + 1.05, ky + q, 0.35, 0.09, 0, Color("f2f2f2"))
 				if ky + 1.4 < MAP:
-					Iso.quad(self, o, kx + q, ky + 1.05, 0.09, 0.35, 0, Color("f2f2f2"))
-	_draw_lot(o)
+					Iso.quad(g, o, kx + q, ky + 1.05, 0.09, 0.35, 0, Color("f2f2f2"))
+	_draw_lot(g, o)
 
 
-func _draw_lot(o: Vector2) -> void:
+func _draw_lot(g, o: Vector2) -> void:
 	var units := ceili(float(Game.spots()) / (SPOTS_PER_ROW * 2))
 	var pave_end := minf(LOT.end.y - 0.1, 21.4 + 3.0 * (units - 1))
-	Iso.quad(self, o, LOT.position.x, LOT.position.y, LOT.size.x, LOT.size.y, 0, Color("5fb85a"))
+	Iso.quad(g, o, LOT.position.x, LOT.position.y, LOT.size.x, LOT.size.y, 0, Color("5fb85a"))
 	if pave_end < LOT.end.y - 0.3:
 		# área de expansão (terra)
 		for i in 12:
-			Iso.quad(self, o, LOT.position.x + 0.6 + i * 1.2, pave_end + 0.25, 0.5, 0.1, 0, Color("f2a33a"))
-	Iso.quad(self, o, LOT.position.x, LOT.position.y, LOT.size.x, pave_end - LOT.position.y, 0, Color("2f3238"))
-	Iso.quad(self, o, LOT.position.x + 0.08, LOT.position.y, LOT.size.x - 0.16, pave_end - LOT.position.y - 0.08, 0, Color("43464e"))
+			Iso.quad(g, o, LOT.position.x + 0.6 + i * 1.2, pave_end + 0.25, 0.5, 0.1, 0, Color("f2a33a"))
+	Iso.quad(g, o, LOT.position.x, LOT.position.y, LOT.size.x, pave_end - LOT.position.y, 0, Color("2f3238"))
+	Iso.quad(g, o, LOT.position.x + 0.08, LOT.position.y, LOT.size.x - 0.16, pave_end - LOT.position.y - 0.08, 0, Color("43464e"))
 	var yellow := Color("f2d23a")
 	for i in Game.spots():
 		var c := spot_center(i)
 		var x0 := c.x - 0.25
 		var y0 := c.y - 0.5
-		Iso.quad(self, o, x0 - 0.02, y0, 0.04, 1.0, 0, yellow)
-		Iso.quad(self, o, x0 + 0.48, y0, 0.04, 1.0, 0, yellow)
+		Iso.quad(g, o, x0 - 0.02, y0, 0.04, 1.0, 0, yellow)
+		Iso.quad(g, o, x0 + 0.48, y0, 0.04, 1.0, 0, yellow)
 		var back_y := y0 if (i % (SPOTS_PER_ROW * 2)) < SPOTS_PER_ROW else y0 + 0.96
-		Iso.quad(self, o, x0 - 0.02, back_y, 0.54, 0.04, 0, yellow)
+		Iso.quad(g, o, x0 - 0.02, back_y, 0.54, 0.04, 0, yellow)
 	# setas de entrada e saída
-	_arrow(o, ENTRY_X, 17.3, 1.0)
-	_arrow(o, EXIT_X, 17.3, -1.0)
+	_arrow(g, o, ENTRY_X, 17.3, 1.0)
+	_arrow(g, o, EXIT_X, 17.3, -1.0)
 
 
-func _arrow(o: Vector2, x: float, y: float, dirv: float) -> void:
+func _arrow(g, o: Vector2, x: float, y: float, dirv: float) -> void:
 	var white := Color(1, 1, 1, 0.85)
-	Iso.quad(self, o, x - 0.04, y - 0.25, 0.08, 0.5, 0, white)
+	Iso.quad(g, o, x - 0.04, y - 0.25, 0.08, 0.5, 0, white)
 	var tip := y + 0.4 * dirv
 	var base := y + 0.15 * dirv
-	draw_colored_polygon(PackedVector2Array([Iso.p(x - 0.15, base), Iso.p(x + 0.15, base), Iso.p(x, tip)]), white)
+	g.draw_colored_polygon(PackedVector2Array([Iso.p(x - 0.15, base), Iso.p(x + 0.15, base), Iso.p(x, tip)]), white)
 
 
 # ---------------------------------------------------------------- Bairros bloqueados (por cima)

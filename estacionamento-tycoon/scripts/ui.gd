@@ -33,9 +33,12 @@ var toast_label: Label
 var current_tab := ""
 var refreshers: Array[Callable] = []
 var _refresh_acc := 0.0
+var top_inset := 0.0
+var fps_label: Label
 
 
 func _ready() -> void:
+	top_inset = _compute_top_inset()
 	root = Control.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -63,6 +66,19 @@ func _process(delta: float) -> void:
 
 
 # ---------------------------------------------------------------- Tema
+
+## Espaço livre no topo para não ficar embaixo da câmera/entalhe do celular.
+func _compute_top_inset() -> float:
+	var extra := 0.0
+	if OS.has_feature("mobile"):
+		var safe := DisplayServer.get_display_safe_area()
+		var win := DisplayServer.window_get_size()
+		var vis := get_viewport().get_visible_rect().size
+		if win.y > 0:
+			extra = safe.position.y * vis.y / float(win.y)
+		extra = maxf(extra, 48.0)
+	return extra
+
 
 func _box(color: Color, radius: int = 18, pad: int = 12) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
@@ -127,7 +143,7 @@ func _build_top_bar() -> void:
 	bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	bar.offset_left = 10
 	bar.offset_right = -10
-	bar.offset_top = 10
+	bar.offset_top = 10 + top_inset
 	root.add_child(bar)
 	top_bar = bar
 	var row := HBoxContainer.new()
@@ -171,7 +187,7 @@ func _build_status_card() -> void:
 	card.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	card.offset_left = 10
 	card.offset_right = -10
-	card.offset_top = 110
+	card.offset_top = 110 + top_inset
 	root.add_child(card)
 	status_card = card
 	var v := VBoxContainer.new()
@@ -183,6 +199,10 @@ func _build_status_card() -> void:
 	moment_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	moment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	top.add_child(clock_label)
+	fps_label = _label("", 14, C_MUTED)
+	fps_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	top.add_child(fps_label)
 	top.add_child(moment_label)
 	v.add_child(top)
 	status_label = _label("", 19)
@@ -225,6 +245,7 @@ func _update_hud() -> void:
 	status_label.text = "Vagas: %d/%d   Preço: %s/h   Entrada: %d%%" % [
 		Game.occupied, Game.spots(), Game.price_str(Game.price()), int(round(Game.enter_chance() * 100.0))]
 	clock_label.text = Game.clock_str()
+	fps_label.text = "%d FPS" % Engine.get_frames_per_second()
 	moment_label.text = Game.moment_str()
 	city_label.text = "%s  |  %s moradores  |  %s trabalhando" % [
 		Game.phase_name(), Game.int_str(Game.population()), Game.int_str(Game.employed())]
@@ -284,7 +305,7 @@ func _build_side_buttons() -> void:
 	box.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	box.offset_left = -96
 	box.offset_right = -12
-	box.offset_top = 236
+	box.offset_top = 236 + top_inset
 	box.add_theme_constant_override("separation", 10)
 	root.add_child(box)
 	side_buttons = box
@@ -622,7 +643,7 @@ func _collect_offline(twice: bool) -> void:
 func _build_toast() -> void:
 	toast_label = _label("", 26, C_GOLD)
 	toast_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	toast_label.offset_top = 210
+	toast_label.offset_top = 250 + top_inset
 	toast_label.offset_left = -330
 	toast_label.offset_right = 330
 	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

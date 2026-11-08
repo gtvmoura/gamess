@@ -11,6 +11,7 @@ var shirt := Color.RED
 var skin := Color("e0b48a")
 var _forward := true
 var _step := 0.0
+var _leg_up := false
 
 
 func setup(rng: RandomNumberGenerator, p0: Vector2, p1: Vector2) -> void:
@@ -33,11 +34,14 @@ func _process(delta: float) -> void:
 		_forward = true
 	_step += delta * 8.0
 	position = Iso.pg(a.lerp(b, t))
-	queue_redraw()
+	var up := sin(_step) > 0.0
+	if up != _leg_up:
+		_leg_up = up
+		queue_redraw()
 
 
 func _draw() -> void:
-	var leg := 1.5 if sin(_step) > 0.0 else -1.5
+	var leg := 1.5 if _leg_up else -1.5
 	draw_colored_polygon(PackedVector2Array([Vector2(-3, 0), Vector2(3, 0), Vector2(3, 1.5), Vector2(-3, 1.5)]), Color(0, 0, 0, 0.25))
 	draw_line(Vector2(-1, 0), Vector2(-1 + leg * 0.5, -5), Color("2b3550"), 1.5)
 	draw_line(Vector2(1, 0), Vector2(1 - leg * 0.5, -5), Color("2b3550"), 1.5)

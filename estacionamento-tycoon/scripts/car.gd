@@ -2,6 +2,7 @@ extends Node2D
 ## Carro isométrico. Anda na grade seguindo uma lista de pontos e emite `arrived` ao final.
 
 const Iso := preload("res://scripts/iso.gd")
+const Batch := preload("res://scripts/batch.gd")
 
 signal arrived
 
@@ -68,6 +69,12 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
+	var b = Batch.new()
+	_draw_body(b)
+	b.flush(get_canvas_item())
+
+
+func _draw_body(b) -> void:
 	var length := 0.46
 	var width := 0.24
 	var body_h := 7.0
@@ -85,17 +92,17 @@ func _draw() -> void:
 	var lx := length if along_x else width
 	var ly := width if along_x else length
 	var o := Vector2.ZERO
-	Iso.quad(self, o, -lx / 2.0 + 0.06, -ly / 2.0 + 0.06, lx, ly, 0.0, Color(0, 0, 0, 0.3))
-	Iso.prism(self, o, -lx / 2.0, -ly / 2.0, lx, ly, 2.0, body_h, body_color)
+	Iso.quad(b, o, -lx / 2.0 + 0.06, -ly / 2.0 + 0.06, lx, ly, 0.0, Color(0, 0, 0, 0.3))
+	Iso.prism(b, o, -lx / 2.0, -ly / 2.0, lx, ly, 2.0, body_h, body_color)
 	if kind == 2:
 		# janelas do ônibus
 		var glass := Color("26384f")
 		for i in 5:
 			var t0 := 0.08 + i * 0.18
 			if along_x:
-				_face_quad(-lx / 2.0 + lx * t0, ly / 2.0, -lx / 2.0 + lx * (t0 + 0.12), ly / 2.0, 9.0, 15.0, glass)
+				_face_quad(b, -lx / 2.0 + lx * t0, ly / 2.0, -lx / 2.0 + lx * (t0 + 0.12), ly / 2.0, 9.0, 15.0, glass)
 			else:
-				_face_quad(lx / 2.0, -ly / 2.0 + ly * t0, lx / 2.0, -ly / 2.0 + ly * (t0 + 0.12), 9.0, 15.0, glass.darkened(0.2))
+				_face_quad(b, lx / 2.0, -ly / 2.0 + ly * t0, lx / 2.0, -ly / 2.0 + ly * (t0 + 0.12), 9.0, 15.0, glass.darkened(0.2))
 		return
 	# cabine: deslocada para trás em relação ao sentido
 	var cl := 0.55
@@ -117,8 +124,8 @@ func _draw() -> void:
 		else:
 			cd = ly * 0.4
 			cy = (ly * 0.1 if dir.y > 0 else -ly * 0.5)
-	Iso.prism(self, o, cx, cy, cw, cd, 2.0 + body_h, cab_h, Color("26384f"), body_color.lightened(0.1))
+	Iso.prism(b, o, cx, cy, cw, cd, 2.0 + body_h, cab_h, Color("26384f"), body_color.lightened(0.1))
 
 
-func _face_quad(ax: float, ay: float, bx: float, by: float, za: float, zb: float, c: Color) -> void:
-	draw_colored_polygon(PackedVector2Array([Iso.p(ax, ay, za), Iso.p(bx, by, za), Iso.p(bx, by, zb), Iso.p(ax, ay, zb)]), c)
+func _face_quad(b, ax: float, ay: float, bx: float, by: float, za: float, zb: float, c: Color) -> void:
+	b.draw_colored_polygon(PackedVector2Array([Iso.p(ax, ay, za), Iso.p(bx, by, za), Iso.p(bx, by, zb), Iso.p(ax, ay, zb)]), c)

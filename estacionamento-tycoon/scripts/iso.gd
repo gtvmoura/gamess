@@ -21,7 +21,7 @@ static func to_grid(s: Vector2) -> Vector2:
 
 
 ## Losango/retângulo plano na altura z. `o` é a origem (posição do nó) a subtrair.
-static func quad(ci: CanvasItem, o: Vector2, x0: float, y0: float, w: float, d: float, z: float, color: Color) -> void:
+static func quad(ci, o: Vector2, x0: float, y0: float, w: float, d: float, z: float, color: Color) -> void:
 	if w <= 0.001 or d <= 0.001:
 		return
 	ci.draw_colored_polygon(PackedVector2Array([
@@ -29,7 +29,7 @@ static func quad(ci: CanvasItem, o: Vector2, x0: float, y0: float, w: float, d: 
 
 
 ## Caixa com as duas faces visíveis e o topo, com sombreamento.
-static func prism(ci: CanvasItem, o: Vector2, x0: float, y0: float, w: float, d: float, z0: float, h: float, color: Color, top: Color = Color(0, 0, 0, 0)) -> void:
+static func prism(ci, o: Vector2, x0: float, y0: float, w: float, d: float, z0: float, h: float, color: Color, top: Color = Color(0, 0, 0, 0)) -> void:
 	if w <= 0.001 or d <= 0.001:
 		return
 	var z1 := z0 + h
@@ -42,13 +42,13 @@ static func prism(ci: CanvasItem, o: Vector2, x0: float, y0: float, w: float, d:
 
 
 ## Sombra projetada no chão (para baixo-direita).
-static func shadow(ci: CanvasItem, o: Vector2, x0: float, y0: float, w: float, d: float, h: float) -> void:
+static func shadow(ci, o: Vector2, x0: float, y0: float, w: float, d: float, h: float) -> void:
 	var s := minf(h / 40.0, 3.0)
 	quad(ci, o, x0 + 0.1, y0 + 0.1, w + s * 0.5, d + s * 0.15, 0.0, Color(0, 0, 0, 0.22))
 
 
 ## Janelas numa face. Face "y" = frente-esquerda (y = y0+d), face "x" = frente-direita (x = x0+w).
-static func windows(ci: CanvasItem, o: Vector2, x0: float, y0: float, w: float, d: float, z0: float, floors: int, floor_h: float, face: String, rng: RandomNumberGenerator, lit_chance: float, glass: Color) -> void:
+static func windows(ci, o: Vector2, x0: float, y0: float, w: float, d: float, z0: float, floors: int, floor_h: float, face: String, rng: RandomNumberGenerator, lit_chance: float, glass: Color) -> void:
 	var length := w if face == "y" else d
 	var cols := maxi(1, int(length * 2.2))
 	var lit := Color("ffd970")
