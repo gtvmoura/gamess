@@ -84,7 +84,7 @@ func _ready() -> void:
 # ---------------------------------------------------------------- Câmera
 
 func focus_lot(instant: bool = false) -> void:
-	camera.focus(Iso.p(LOT.get_center().x, LOT.position.y + 4.0), 0.9, instant)
+	camera.focus(Iso.p(23.5, 20.0), 1.15, instant)
 
 
 func show_map() -> void:
@@ -94,7 +94,8 @@ func show_map() -> void:
 func focus_district(i: int) -> void:
 	if i >= 0 and i < district_centers.size():
 		var c: Vector2 = district_centers[i]
-		camera.focus(Iso.pg(c), 0.55, false)
+		# desloca para o bairro aparecer acima do painel aberto
+		camera.focus(Iso.pg(c) + Vector2(0, 330.0 / 0.55), 0.55, false)
 
 
 func _on_tapped(world_pos: Vector2) -> void:
@@ -146,6 +147,10 @@ func _assign_districts() -> void:
 func _block_angle(b: Vector2i) -> float:
 	var a := atan2(b.y - 2.5, b.x - 2.5)
 	return fposmod(a + PI * 0.75 + PI / 3.0, TAU)
+
+
+func _in_front_of_lot(b: Vector2i) -> bool:
+	return b.x >= 1 and b.x <= 4 and b.y >= 1 and b.y <= 4 and (b.x == 4 or b.y == 4)
 
 
 func _dev(dist: int) -> float:
@@ -252,7 +257,11 @@ func _build_city(br: RandomNumberGenerator) -> void:
 				elif not tower:
 					floors = mini(6 + int((s - 0.65) * 16.0), 12)
 				else:
-					floors = mini(12 + int((s - 1.0) * 30.0), 34)
+					floors = mini(12 + int((s - 1.0) * 24.0), 26)
+				# quarteirões na frente do estacionamento (mais perto da câmera) ficam baixos
+				if _in_front_of_lot(b):
+					tower = false
+					floors = mini(floors, 4)
 				var bw := 2.4 if tower else 2.7
 				var bld = _prop("tower" if tower else "building", px + (2.9 - bw) / 2.0, py + (2.9 - bw) / 2.0, bw, bw)
 				bld.floors = maxi(2, floors)
@@ -281,13 +290,23 @@ func _build_lot_props() -> void:
 	for i in mini(lamps.size(), a * 3):
 		var l = _prop("lamp", lamps[i].x, lamps[i].y)
 		l.lit_chance = lit
+	# árvores no terreno reservado para futuras vagas
+	var tr := RandomNumberGenerator.new()
+	tr.seed = 555
+	var free_y := 21.6 + 3.0 * (units - 1) + 0.6
+	var yy := free_y
+	while yy < LOT.end.y - 0.4:
+		var xx := LOT.position.x + 0.6
+		while xx < LOT.end.x - 0.4:
+			if tr.randf() < 0.45:
+				_tree(xx + tr.randf_range(-0.3, 0.3), yy + tr.randf_range(-0.3, 0.3), tr, false)
+			xx += 1.3
+		yy += 1.3
 	var canopies := 0
 	if a >= 4:
 		canopies = 1
 	if a >= 8:
 		canopies = 2
-	if a >= 12:
-		canopies = units * 2
 	for c in mini(canopies, units * 2):
 		var u := c / 2
 		var y := 18.0 + 3.0 * u + (2.0 if c % 2 == 1 else 0.0)
@@ -513,6 +532,10 @@ func _exit_road() -> Array:
 func _spawn_arrival(idx: int) -> void:
 	var road := _arrival_road()
 	var car = _new_car(road[0])
+	if car.kind == 2:
+		car.kind = 0
+		car.body_color = CarScript.COLORS[rng.randi_range(0, 5)]
+		car.queue_redraw()
 	car.spot_index = idx
 	spot_cars[idx] = car
 	var c := spot_center(idx)
@@ -644,9 +667,8 @@ func _draw_lot(o: Vector2) -> void:
 	Iso.quad(self, o, LOT.position.x, LOT.position.y, LOT.size.x, LOT.size.y, 0, Color("5fb85a"))
 	if pave_end < LOT.end.y - 0.3:
 		# área de expansão (terra)
-		Iso.quad(self, o, LOT.position.x + 0.3, pave_end + 0.2, LOT.size.x - 0.6, LOT.end.y - pave_end - 0.5, 0, Color("b99a68"))
 		for i in 12:
-			Iso.quad(self, o, LOT.position.x + 0.6 + i * 1.2, pave_end + 0.5, 0.5, 0.12, 0, Color("f2a33a"))
+			Iso.quad(self, o, LOT.position.x + 0.6 + i * 1.2, pave_end + 0.25, 0.5, 0.1, 0, Color("f2a33a"))
 	Iso.quad(self, o, LOT.position.x, LOT.position.y, LOT.size.x, pave_end - LOT.position.y, 0, Color("2f3238"))
 	Iso.quad(self, o, LOT.position.x + 0.08, LOT.position.y, LOT.size.x - 0.16, pave_end - LOT.position.y - 0.08, 0, Color("43464e"))
 	var yellow := Color("f2d23a")

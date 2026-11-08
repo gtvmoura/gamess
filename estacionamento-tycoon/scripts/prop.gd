@@ -2,7 +2,7 @@ extends Node2D
 ## Objeto estático do mapa (prédio, casa, árvore, poste...). Desenhado por código em isométrico.
 
 const Iso := preload("res://scripts/iso.gd")
-const FLOOR_H := 11.0
+const FLOOR_H := 9.5
 
 var kind := "tree"
 var x0 := 0.0
