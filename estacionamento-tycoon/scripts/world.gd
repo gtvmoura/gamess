@@ -69,6 +69,8 @@ var _lot_text_acc := 0.0
 var cars: Array = []              # carros ativos (para manter distância)
 var _arriving := 0                # carros a caminho de uma vaga
 const MAX_ARRIVING := 8
+const MAX_MOVING := 70            # teto de carros andando ao mesmo tempo
+var _moving_count := 0
 var _frame := 0
 var _collect = null          # quando não é null, _prop() junta aqui em vez de criar nós
 var _entry_gate = null
@@ -650,12 +652,12 @@ func _process_inner(delta: float) -> void:
 	_update_gates(delta)
 	# carros que passam na frente do estacionamento sem entrar
 	_passer_acc += minf(Game.passing_per_sec() * (1.0 - Game.enter_chance()), 0.6) * delta
-	if _passer_acc >= 1.0:
+	if _passer_acc >= 1.0 and _moving_count < MAX_MOVING:
 		_passer_acc = 0.0
 		_spawn_passer()
 	_traffic_timer += delta
 	var target := clampi(int(Game.passing_per_sec() * 3.0), 4, 12)
-	if _traffic_timer >= 0.35 and traffic_count < target:
+	if _traffic_timer >= 0.35 and traffic_count < target and _moving_count < MAX_MOVING:
 		_traffic_timer = 0.0
 		_spawn_traffic()
 	_fx_budget = minf(_fx_budget + delta * 4.0, 4.0)
@@ -840,6 +842,7 @@ func _keep_distance() -> void:
 			cells[key] = []
 		cells[key].append(c)
 	var crowd_crossing: Array = crowd.crossing if crowd else []
+	_moving_count = moving.size()
 	for c in moving:
 		var g: Vector2 = c.grid
 		var dir: Vector2 = c.dir
@@ -862,7 +865,11 @@ func _keep_distance() -> void:
 						continue
 					if absf(d.x * dir.y - d.y * dir.x) > 0.16:
 						continue
-					if (o.dir as Vector2).dot(dir) < -0.5:
+					var dd := (o.dir as Vector2).dot(dir)
+					if dd < -0.5:
+						continue
+					# carro vindo de lado: só espera se ele estiver bem à frente (evita espera mútua)
+					if dd < 0.5 and along < 0.3:
 						continue
 					blocked = true
 					break
@@ -878,6 +885,15 @@ func _keep_distance() -> void:
 				if al > 0.0 and al < 0.8 and absf(dp.x * dir.y - dp.y * dir.x) < 0.35:
 					blocked = true
 					break
+		# destravador: quem espera demais segue um pouco
+		if blocked:
+			c.held_for += 0.033
+			if c.held_for > 6.0:
+				blocked = false
+				if c.held_for > 7.0:
+					c.held_for = 0.0
+		else:
+			c.held_for = 0.0
 		c.hold = blocked
 
 

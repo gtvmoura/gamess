@@ -27,6 +27,7 @@ var spent := 0.0
 var status := ""
 var angry := false
 var hold := false   # parado esperando o carro da frente
+var held_for := 0.0
 var _go := 1.0
 var frames := {}   # sprites da Kenney por direção: "px","py","nx","ny" -> [tex, rect]
 var kind := 0  # 0 carro, 1 caminhonete, 2 ônibus
