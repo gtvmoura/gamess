@@ -26,6 +26,8 @@ var hours := 0.0
 var spent := 0.0
 var status := ""
 var angry := false
+var hold := false   # parado esperando o carro da frente
+var _go := 1.0
 var frames := {}   # sprites da Kenney por direção: "px","py","nx","ny" -> [tex, rect]
 var kind := 0  # 0 carro, 1 caminhonete, 2 ônibus
 
@@ -70,7 +72,8 @@ func go(points: Array, spd: float = 3.0) -> void:
 
 
 func _process(delta: float) -> void:
-	var step := speed * delta
+	_go = move_toward(_go, 0.0 if hold else 1.0, delta * (6.0 if hold else 2.5))
+	var step := speed * delta * _go
 	while step > 0.0 and not path.is_empty():
 		var to := path[0] - grid
 		var dist := to.length()

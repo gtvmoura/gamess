@@ -83,6 +83,8 @@ func _new_ped() -> Dictionary:
 		"pants": PANTS[rng.randi_range(0, PANTS.size() - 1)],
 		"phase": rng.randf() * TAU,
 		"cross": false,
+		"lat": rng.randf_range(0.03, 0.11),
+		"v": Vector2.ZERO,
 	}
 
 
@@ -136,7 +138,8 @@ func _process(delta: float) -> void:
 			p.pos = to
 			_next_leg(p)
 		else:
-			p.pos = pos + (to - pos) / d * step
+			p.v = (to - pos) / d
+			p.pos = pos + p.v * step
 	_acc += delta
 	if _acc < 1.0 / REDRAW_HZ:
 		return
@@ -175,7 +178,10 @@ func _draw_layer(n: Node2D) -> void:
 		return
 	var b = Batch.new()
 	for p in list:
-		var c := Iso.pg(p.pos, 2.6) - n.position
+		# cada um anda do seu lado (mão direita), sem se atravessar com quem vem no sentido oposto
+		var v: Vector2 = p.v
+		var gp: Vector2 = p.pos + Vector2(-v.y, v.x) * float(p.lat)
+		var c := Iso.pg(gp, 2.6) - n.position
 		var leg := 1.4 if sin(_t * 9.0 + float(p.phase)) > 0.0 else -1.4
 		var shirt: Color = p.shirt
 		var skin: Color = p.skin

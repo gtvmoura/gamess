@@ -82,6 +82,7 @@ const UPGRADES := {
 	"fleet": {"name": "Frota de Veículos", "desc": "Concessionárias na cidade: mais moradores compram carros.", "base": 400.0, "growth": 1.75, "max": 20},
 	"city": {"name": "Moradias", "desc": "Novas casas e prédios residenciais: mais gente pode morar na cidade.", "base": 1000.0, "growth": 1.85, "max": 30},
 	"jobs": {"name": "Atrair Empresas", "desc": "Lojas, escritórios e fábricas: empregos trazem moradores e trabalhadores.", "base": 700.0, "growth": 1.8, "max": 30},
+	"garage": {"name": "Edifício-Garagem", "desc": "Prédio-garagem ao lado do estacionamento: +30 vagas por andar.", "base": 25000.0, "growth": 1.85, "max": 12},
 }
 
 const DISTRICTS := [
@@ -125,7 +126,7 @@ var money: float = 500.0
 var gems: int = 20
 var level: int = 1
 var xp: float = 0.0
-var lvl := {"spots": 0, "attract": 0, "comfort": 0, "fleet": 0, "city": 0, "jobs": 0}
+var lvl := {"spots": 0, "attract": 0, "comfort": 0, "fleet": 0, "city": 0, "jobs": 0, "garage": 0}
 ## Moradores atuais (crescem aos poucos até a meta definida por moradia e empregos).
 var pop: float = 1000.0
 var day: int = 1
@@ -147,6 +148,12 @@ var staff := {}
 var rating: float = 3.5
 var recent_lost: float = 0.0
 var achievements: Array = []
+## Estacionamentos nos bairros: índice do bairro -> {"lvl": vagas, "floors": andares}
+var lots := {}
+## Prestígio
+var prestige_points: int = 0
+var prestige_count: int = 0
+var prestige_lvl := {}
 
 ## Vagas ocupadas agora (atualizado pela cena do estacionamento).
 var occupied: int = 0
@@ -177,8 +184,17 @@ func _notification(what: int) -> void:
 
 # ---------------------------------------------------------------- Economia
 
+## Vagas no pátio (desenhadas) + vagas do edifício-garagem.
 func spots() -> int:
+	return surface_spots() + garage_spots()
+
+
+func surface_spots() -> int:
 	return 10 + 5 * int(lvl.spots)
+
+
+func garage_spots() -> int:
+	return int(lvl.get("garage", 0)) * (30 + 10 * plvl("modular"))
 
 
 func price() -> float:
@@ -208,11 +224,11 @@ func population() -> float:
 
 ## Quantas pessoas cabem nas moradias da cidade.
 func housing() -> float:
-	return 1200.0 * pow(1.3, float(lvl.city)) * district_pop_mult() * (1.0 + 0.1 * rlvl("urban"))
+	return 1200.0 * pow(1.3, float(lvl.city)) * district_pop_mult() * (1.0 + 0.1 * rlvl("urban")) * (1.0 + 0.15 * plvl("planning")) * (1.0 + 0.1 * plvl("smartcity"))
 
 
 func jobs() -> float:
-	return 600.0 * pow(1.3, float(lvl.get("jobs", 0))) * district_jobs_mult() * (1.0 + 0.1 * rlvl("business"))
+	return 600.0 * pow(1.3, float(lvl.get("jobs", 0))) * district_jobs_mult() * (1.0 + 0.1 * rlvl("business")) * (1.0 + 0.15 * plvl("planning"))
 
 
 func district_jobs_mult() -> float:
@@ -262,7 +278,11 @@ func _simulate(delta: float) -> void:
 	if salary_per_hour() > 0.0:
 		money = maxf(0.0, money - salary_per_hour() / 3600.0 * delta)
 	var target := target_population()
-	pop += (target - pop) * (1.0 - exp(-delta / 40.0))
+	pop += (target - pop) * (1.0 - exp(-delta * (1.0 + 0.25 * plvl("smartcity")) / 40.0))
+	var li := lots_income_per_sec()
+	if li > 0.0:
+		money += li * delta
+		total_earned += li * delta
 	hour += delta * 24.0 / DAY_SECONDS
 	if hour >= 24.0:
 		hour -= 24.0
@@ -333,7 +353,7 @@ func phase_name() -> String:
 
 ## Preço que os motoristas acham "justo": sobe com atratividade e riqueza da cidade.
 func fair_price() -> float:
-	return 8.0 + 1.2 * float(lvl.attract) + 0.25 * float(lvl.city) + 0.9 * float(lvl.get("comfort", 0)) + 1.5 * rlvl("contracts") + 0.8 * staff_count("guard")
+	return (8.0 + 1.2 * float(lvl.attract) + 0.25 * float(lvl.city) + 0.9 * float(lvl.get("comfort", 0)) + 1.5 * rlvl("contracts") + 0.8 * staff_count("guard")) * (1.0 + 0.06 * plvl("corporate"))
 
 
 ## Quanto o cliente "sente" o preço acima do justo (maior = rejeita mais).
@@ -382,7 +402,7 @@ func enter_chance() -> float:
 
 
 func enter_chance_at(p: float) -> float:
-	var base := (0.35 + 0.05 * float(lvl.attract)) * (1.0 + 0.08 * rlvl("marketing")) * (1.0 + 0.03 * staff_count("cleaner")) * rating_mult()
+	var base := (0.35 + 0.05 * float(lvl.attract)) * (1.0 + 0.08 * rlvl("marketing")) * (1.0 + 0.03 * staff_count("cleaner")) * rating_mult() * (1.0 + 0.05 * plvl("brand"))
 	return clampf(base * price_acceptance(p), 0.005, 0.95)
 
 
@@ -402,6 +422,7 @@ func income_mult() -> float:
 	var m := district_income_mult()
 	m *= 1.0 + 0.1 * rlvl("digital")
 	m *= 1.0 + 0.04 * staff_count("cashier")
+	m *= (1.0 + 0.1 * plvl("investors")) * (1.0 + 0.4 * plvl("monopoly"))
 	if is_boosted():
 		m *= 2.0
 	return m
@@ -409,7 +430,7 @@ func income_mult() -> float:
 
 ## Multiplicador do tempo de permanência (manobristas fazem girar mais rápido).
 func stay_factor() -> float:
-	return 1.0 / (1.0 + 0.12 * rlvl("valet") + 0.08 * staff_count("valet"))
+	return 1.0 / (1.0 + 0.12 * rlvl("valet") + 0.08 * staff_count("valet")) * (1.0 - 0.1 * plvl("automation"))
 
 
 ## Receita esperada por segundo (usada para renda offline e para o HUD).
@@ -427,7 +448,217 @@ func expected_income_at(p: float) -> float:
 	var avg_stay := (w * STAY_WORK_SECONDS + sh * STAY_SHOP_SECONDS) / total * stay_factor()
 	var avg_hours := (w * HOURS_WORK + sh * HOURS_SHOP) / total
 	var served := minf(total, float(spots()) / avg_stay)
-	return served * (p * avg_hours + service_value_per_car()) * income_mult()
+	return served * (p * avg_hours + service_value_per_car()) * income_mult() + lots_income_at(p)
+
+
+# ---------------------------------------------------------------- Estacionamentos nos bairros
+
+func lot_lvl(d: int) -> int:
+	return int((lots.get(str(d), {}) as Dictionary).get("lvl", 0))
+
+
+func lot_floors(d: int) -> int:
+	return int((lots.get(str(d), {}) as Dictionary).get("floors", 0))
+
+
+func lot_capacity(d: int) -> int:
+	if lot_lvl(d) <= 0:
+		return 0
+	return 20 + 10 * (lot_lvl(d) - 1) + lot_floors(d) * (30 + 10 * plvl("modular"))
+
+
+func _lot_base_cost(d: int) -> float:
+	return maxf(8000.0, float(DISTRICTS[d].cost) * 0.6) * (1.0 - 0.1 * plvl("realestate"))
+
+
+func lot_cost(d: int) -> float:
+	var l := lot_lvl(d)
+	if l == 0:
+		return floor(_lot_base_cost(d))
+	return floor(_lot_base_cost(d) * 0.35 * pow(1.6, float(l)))
+
+
+func lot_floor_cost(d: int) -> float:
+	return floor(_lot_base_cost(d) * 0.9 * pow(1.8, float(lot_floors(d))) * (1.0 - 0.15 * plvl("modular")))
+
+
+func lot_max_lvl() -> int:
+	return 10
+
+
+func can_buy_lot(d: int) -> bool:
+	return d >= 1 and d < districts_unlocked and lot_lvl(d) < lot_max_lvl() and money >= lot_cost(d)
+
+
+func buy_lot(d: int) -> bool:
+	if not can_buy_lot(d):
+		return false
+	money -= lot_cost(d)
+	var e: Dictionary = lots.get(str(d), {"lvl": 0, "floors": 0})
+	e.lvl = int(e.get("lvl", 0)) + 1
+	lots[str(d)] = e
+	if int(e.lvl) == 1:
+		notify.emit("Novo estacionamento em %s!" % DISTRICTS[d].name)
+	add_xp(20.0)
+	changed.emit()
+	save_game()
+	return true
+
+
+func can_buy_lot_floor(d: int) -> bool:
+	return lot_lvl(d) >= 3 and lot_floors(d) < 8 and money >= lot_floor_cost(d)
+
+
+func buy_lot_floor(d: int) -> bool:
+	if not can_buy_lot_floor(d):
+		return false
+	money -= lot_floor_cost(d)
+	var e: Dictionary = lots[str(d)]
+	e.floors = int(e.get("floors", 0)) + 1
+	lots[str(d)] = e
+	add_xp(30.0)
+	changed.emit()
+	save_game()
+	return true
+
+
+## Demanda local do bairro (fração do movimento da cidade).
+func lot_demand_share(d: int) -> float:
+	return (float(DISTRICTS[d].pop) + float(DISTRICTS[d].jobs)) * 0.18
+
+
+func lot_income_at(d: int, p: float) -> float:
+	var cap := lot_capacity(d)
+	if cap <= 0:
+		return 0.0
+	var chance := enter_chance_at(p)
+	var w := work_traffic_avg() * chance * lot_demand_share(d)
+	var sh := shop_traffic_avg() * chance * lot_demand_share(d)
+	var total := w + sh
+	if total <= 0.0:
+		return 0.0
+	var avg_stay := (w * STAY_WORK_SECONDS + sh * STAY_SHOP_SECONDS) / total * stay_factor()
+	var avg_hours := (w * HOURS_WORK + sh * HOURS_SHOP) / total
+	return minf(total, float(cap) / avg_stay) * p * avg_hours * income_mult()
+
+
+func lots_income_at(p: float) -> float:
+	var t := 0.0
+	for k in lots.keys():
+		t += lot_income_at(int(k), p)
+	return t
+
+
+func lots_income_per_sec() -> float:
+	return lots_income_at(price())
+
+
+func lots_count() -> int:
+	var n := 0
+	for k in lots.keys():
+		if lot_lvl(int(k)) > 0:
+			n += 1
+	return n
+
+
+# ---------------------------------------------------------------- Prestígio
+
+const PRESTIGE := {
+	"investors": {"tier": 1, "name": "Investidores", "desc": "+10% de receita por nível.", "base": 1.0, "max": 10},
+	"brand": {"tier": 1, "name": "Marca Conhecida", "desc": "+5% de chance de entrada por nível.", "base": 1.0, "max": 10},
+	"seed": {"tier": 1, "name": "Capital Inicial", "desc": "Começa cada cidade com mais dinheiro.", "base": 1.0, "max": 10},
+	"labs": {"tier": 1, "name": "Laboratório Próprio", "desc": "Pesquisas 10% mais rápidas por nível.", "base": 2.0, "max": 5},
+	"remote": {"tier": 2, "name": "Gestão à Distância", "desc": "+20% de renda offline por nível.", "base": 3.0, "max": 5},
+	"corporate": {"tier": 2, "name": "Contratos Corporativos", "desc": "+6% no preço justo por nível.", "base": 3.0, "max": 10},
+	"realestate": {"tier": 2, "name": "Imobiliária Parceira", "desc": "Bairros e estacionamentos 10% mais baratos por nível.", "base": 4.0, "max": 5},
+	"training": {"tier": 2, "name": "Equipe Treinada", "desc": "Salários 10% menores por nível.", "base": 3.0, "max": 5},
+	"services": {"tier": 3, "name": "Império Automotivo", "desc": "Serviços rendem +20% por nível.", "base": 8.0, "max": 10},
+	"planning": {"tier": 3, "name": "Planejamento Mestre", "desc": "+15% de moradia e empregos por nível.", "base": 8.0, "max": 10},
+	"modular": {"tier": 3, "name": "Garagens Modulares", "desc": "Andares de garagem 15% mais baratos e +10 vagas cada.", "base": 10.0, "max": 5},
+	"legend": {"tier": 3, "name": "Lenda do Setor", "desc": "+0,3 estrela na avaliação por nível.", "base": 10.0, "max": 5},
+	"monopoly": {"tier": 4, "name": "Monopólio", "desc": "+40% de receita por nível.", "base": 25.0, "max": 10},
+	"smartcity": {"tier": 4, "name": "Cidade Inteligente", "desc": "Cidade cresce 25% mais rápido e +10% de moradia.", "base": 25.0, "max": 5},
+	"automation": {"tier": 4, "name": "Automação Total", "desc": "Carros giram 10% mais rápido por nível.", "base": 30.0, "max": 5},
+	"dynasty": {"tier": 4, "name": "Dinastia", "desc": "+20% de pontos de prestígio nas próximas vendas.", "base": 40.0, "max": 5},
+}
+## Pontos investidos necessários para abrir cada nível da árvore.
+const TIER_REQ := {1: 0, 2: 8, 3: 30, 4: 100}
+const TIER_NAMES := {1: "Fundação", 2: "Expansão", 3: "Domínio", 4: "Legado"}
+
+
+func plvl(key: String) -> int:
+	return int(prestige_lvl.get(key, 0))
+
+
+func prestige_spent() -> int:
+	var t := 0
+	for k in prestige_lvl.keys():
+		var l := int(prestige_lvl[k])
+		for i in l:
+			t += prestige_cost_at(String(k), i)
+	return t
+
+
+func prestige_cost_at(key: String, level_i: int) -> int:
+	return int(ceil(float(PRESTIGE[key].base) * pow(1.6, float(level_i))))
+
+
+func prestige_cost(key: String) -> int:
+	return prestige_cost_at(key, plvl(key))
+
+
+func tier_unlocked(tier: int) -> bool:
+	return prestige_spent() >= int(TIER_REQ[tier])
+
+
+func can_buy_prestige(key: String) -> bool:
+	var u: Dictionary = PRESTIGE[key]
+	return tier_unlocked(int(u.tier)) and plvl(key) < int(u.max) and prestige_points >= prestige_cost(key)
+
+
+func buy_prestige(key: String) -> bool:
+	if not can_buy_prestige(key):
+		return false
+	prestige_points -= prestige_cost(key)
+	prestige_lvl[key] = plvl(key) + 1
+	changed.emit()
+	save_game()
+	return true
+
+
+## Pontos que você ganharia vendendo o império agora.
+func prestige_gain() -> int:
+	return int(floor(sqrt(total_earned / 2000000.0) * (1.0 + 0.2 * plvl("dynasty"))))
+
+
+func start_money() -> float:
+	return 500.0 * (1.0 + 2.0 * plvl("seed")) * (1.0 + 0.5 * plvl("seed"))
+
+
+## Vende o império: ganha pontos de prestígio e recomeça a cidade.
+func do_prestige() -> bool:
+	var gain := prestige_gain()
+	if gain < 1:
+		return false
+	var keep_gems := gems
+	var keep_ach := achievements.duplicate()
+	var keep_pl := prestige_lvl.duplicate()
+	var keep_pp := prestige_points + gain
+	var keep_pc := prestige_count + 1
+	from_dict({})
+	gems = keep_gems + 25
+	achievements = keep_ach
+	prestige_lvl = keep_pl
+	prestige_points = keep_pp
+	prestige_count = keep_pc
+	money = start_money()
+	level = 1
+	xp = 0.0
+	offline_pending = 0.0
+	notify.emit("Império vendido! +%d pontos de prestígio" % gain)
+	save_game()
+	changed.emit()
+	return true
 
 
 # ---------------------------------------------------------------- Serviços e funcionários
@@ -503,7 +734,7 @@ func service_chance(key: String) -> float:
 ## Preço do serviço acompanha a riqueza da cidade (preço justo do estacionamento).
 func service_price(key: String) -> float:
 	var l := maxi(1, service_lvl(key))
-	return float(SERVICES[key].price) * (1.0 + 0.3 * (l - 1)) * sqrt(fair_price() / 8.0)
+	return float(SERVICES[key].price) * (1.0 + 0.3 * (l - 1)) * sqrt(fair_price() / 8.0) * (1.0 + 0.2 * plvl("services"))
 
 
 ## Quanto, em média, cada cliente gasta em serviços.
@@ -532,7 +763,7 @@ func roll_services(r: RandomNumberGenerator) -> Array:
 
 ## Avaliação para onde a nota caminha, conforme a experiência dos clientes.
 func target_rating() -> float:
-	var r := 3.0
+	var r := 3.0 + 0.3 * plvl("legend")
 	r += 0.12 * staff_count("cleaner") + 0.1 * staff_count("guard")
 	r += 0.03 * float(lvl.get("comfort", 0)) + 0.02 * float(lvl.attract)
 	var built := 0
@@ -619,7 +850,7 @@ func wage_level() -> float:
 
 
 func staff_salary(key: String) -> float:
-	return float(STAFF[key].salary) * wage_level()
+	return float(STAFF[key].salary) * wage_level() * (1.0 - 0.1 * plvl("training"))
 
 
 func staff_hire_cost(key: String) -> float:
@@ -679,7 +910,7 @@ func research_cost(key: String) -> float:
 
 
 func research_time(key: String) -> float:
-	return float(RESEARCH[key].time) * (1.0 + 0.6 * rlvl(key))
+	return float(RESEARCH[key].time) * (1.0 + 0.6 * rlvl(key)) * (1.0 - 0.1 * plvl("labs"))
 
 
 func research_maxed(key: String) -> bool:
@@ -769,7 +1000,10 @@ func boost_seconds_left() -> float:
 
 func upgrade_cost(key: String) -> float:
 	var u: Dictionary = UPGRADES[key]
-	return floor(float(u.base) * pow(float(u.growth), float(lvl[key])))
+	var c := floorf(float(u.base) * pow(float(u.growth), float(lvl.get(key, 0))))
+	if key == "garage":
+		c = floorf(c * (1.0 - 0.15 * plvl("modular")))
+	return c
 
 
 func upgrade_maxed(key: String) -> bool:
@@ -794,7 +1028,7 @@ func buy_upgrade(key: String) -> bool:
 func next_district_cost() -> float:
 	if districts_unlocked >= DISTRICTS.size():
 		return -1.0
-	return float(DISTRICTS[districts_unlocked].cost)
+	return float(DISTRICTS[districts_unlocked].cost) * (1.0 - 0.1 * plvl("realestate"))
 
 
 func buy_next_district() -> bool:
@@ -955,6 +1189,10 @@ func to_dict() -> Dictionary:
 		"staff": staff,
 		"rating": rating,
 		"achievements": achievements,
+		"lots": lots,
+		"prestige_points": prestige_points,
+		"prestige_count": prestige_count,
+		"prestige_lvl": prestige_lvl,
 		"pop": pop,
 		"day": day,
 		"hour": hour,
@@ -996,6 +1234,18 @@ func from_dict(d: Dictionary) -> void:
 		if SERVICES.has(String(k)):
 			services[String(k)] = int(sv[k])
 	rating = float(d.get("rating", 3.5))
+	lots = {}
+	var ls: Dictionary = d.get("lots", {})
+	for k in ls.keys():
+		var e: Dictionary = ls[k]
+		lots[String(k)] = {"lvl": int(e.get("lvl", 0)), "floors": int(e.get("floors", 0))}
+	prestige_points = int(d.get("prestige_points", 0))
+	prestige_count = int(d.get("prestige_count", 0))
+	prestige_lvl = {}
+	var pl: Dictionary = d.get("prestige_lvl", {})
+	for k in pl.keys():
+		if PRESTIGE.has(String(k)):
+			prestige_lvl[String(k)] = int(pl[k])
 	achievements = []
 	for a in d.get("achievements", []):
 		achievements.append(String(a))
@@ -1037,7 +1287,7 @@ func load_game() -> void:
 		var boosted := boost_until
 		boost_until = 0.0
 		var net := maxf(0.0, expected_income_per_sec() - salary_per_hour() / 3600.0)
-		offline_pending = net * offline_seconds * (OFFLINE_EFFICIENCY + 0.1 * rlvl("remote"))
+		offline_pending = net * offline_seconds * (OFFLINE_EFFICIENCY + 0.1 * rlvl("remote") + 0.2 * plvl("remote"))
 		boost_until = boosted
 
 

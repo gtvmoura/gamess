@@ -79,6 +79,10 @@ func draw_into(target, o: Vector2) -> void:
 			_draw_gate(o)
 		"fence":
 			_draw_fence(o)
+		"parking_garage":
+			_draw_parking_garage(o)
+		"district_lot":
+			_draw_district_lot(o)
 		"svc_wash":
 			_draw_wash(o)
 		"svc_cafe":
@@ -251,6 +255,75 @@ func _draw_fence(o: Vector2) -> void:
 		_c.draw_line(Iso.pg(a, zr) - o, Iso.pg(b, zr) - o, light, 2.0)
 	# base de concreto
 	_c.draw_line(Iso.pg(a, 0.5) - o, Iso.pg(b, 0.5) - o, Color("b8b2a4"), 3.0)
+
+
+const CAR_COLS := [Color("e03b3b"), Color("f4f4f4"), Color("2b2f3a"), Color("f2c230"), Color("3a7bd9"), Color("9aa0aa"), Color("2e9e5b"), Color("e07b2f")]
+
+
+## Edifício-garagem: lajes de concreto, pilares, carros em cada andar e placa P.
+func _draw_parking_garage(o: Vector2) -> void:
+	var fh := 13.0
+	var n := maxi(1, floors)
+	var h := n * fh + 4.0
+	Iso.shadow(_c, o, x0, y0, w, d, h)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var concrete := Color("c9c6be")
+	for f in n:
+		var z := f * fh
+		# laje
+		Iso.prism(_c, o, x0, y0, w, d, z, 3.0, concrete.darkened(0.08), concrete)
+		# carros estacionados no andar (só as fileiras da frente aparecem)
+		var cols := int(w / 0.55)
+		for i in cols:
+			if rng.randf() < 0.7:
+				var cx := x0 + 0.15 + i * (w - 0.3) / cols
+				var c: Color = CAR_COLS[rng.randi_range(0, CAR_COLS.size() - 1)]
+				Iso.prism(_c, o, cx, y0 + d - 0.6, 0.26, 0.45, z + 3.0, 5.0, c)
+		var rows := int(d / 0.55)
+		for i in rows:
+			if rng.randf() < 0.7:
+				var cy := y0 + 0.15 + i * (d - 0.3) / rows
+				var c2: Color = CAR_COLS[rng.randi_range(0, CAR_COLS.size() - 1)]
+				Iso.prism(_c, o, x0 + w - 0.6, cy, 0.45, 0.26, z + 3.0, 5.0, c2)
+		# pilares
+		for px in [x0 + 0.05, x0 + w * 0.5, x0 + w - 0.15]:
+			Iso.prism(_c, o, px, y0 + d - 0.12, 0.1, 0.1, z + 3.0, fh - 3.0, concrete.darkened(0.15))
+		for py in [y0 + 0.05, y0 + d * 0.5]:
+			Iso.prism(_c, o, x0 + w - 0.12, py, 0.1, 0.1, z + 3.0, fh - 3.0, concrete.darkened(0.25))
+		# guarda-corpo listrado
+		_c.draw_line(Iso.p(x0, y0 + d, z + 7.5) - o, Iso.p(x0 + w, y0 + d, z + 7.5) - o, Color("f2c230"), 1.5)
+		_c.draw_line(Iso.p(x0 + w, y0 + d, z + 7.5) - o, Iso.p(x0 + w, y0, z + 7.5) - o, Color("f2c230"), 1.5)
+	# cobertura e placa P
+	Iso.prism(_c, o, x0, y0, w, d, n * fh, 4.0, concrete.darkened(0.05), Color("a9b4c2"))
+	var sp := Iso.p(x0 + w * 0.5, y0 + d, n * fh + 4.0) - o
+	_c.draw_colored_polygon(PackedVector2Array([sp + Vector2(-9, -20), sp + Vector2(9, -20), sp + Vector2(9, -2), sp + Vector2(-9, -2)]), Color("1d4fb8"))
+	_c.draw_line(sp + Vector2(-3, -5), sp + Vector2(-3, -17), Color.WHITE, 2.5)
+	_c.draw_colored_polygon(PackedVector2Array([sp + Vector2(-3, -17), sp + Vector2(2, -17), sp + Vector2(4, -14), sp + Vector2(2, -11), sp + Vector2(-3, -11)]), Color.WHITE)
+
+
+## Estacionamento de bairro (pátio): asfalto, vagas e carros.
+func _draw_district_lot(o: Vector2) -> void:
+	Iso.quad(_c, o, x0 - 0.05, y0 - 0.05, w + 0.1, d + 0.1, 2.7, Color("2f3238"))
+	Iso.quad(_c, o, x0, y0, w, d, 2.7, Color("43464e"))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var rows := 2
+	var cols := int(w / 0.5)
+	var fill := clampf(0.35 + floors * 0.06, 0.3, 0.95)
+	for r in rows:
+		var ry := y0 + 0.2 + r * (d * 0.5)
+		for i in cols:
+			var sx := x0 + 0.1 + i * 0.5
+			Iso.quad(_c, o, sx, ry, 0.03, 0.9, 2.8, Color("f2d23a"))
+			if rng.randf() < fill:
+				var c: Color = CAR_COLS[rng.randi_range(0, CAR_COLS.size() - 1)]
+				Iso.prism(_c, o, sx + 0.12, ry + 0.2, 0.26, 0.5, 2.8, 6.0, c)
+	# placa
+	var sp := Iso.p(x0 + w, y0 + d, 2.7) - o
+	_c.draw_line(sp, sp - Vector2(0, 22), Color("555555"), 2.0)
+	_c.draw_colored_polygon(PackedVector2Array([sp + Vector2(-7, -34), sp + Vector2(7, -34), sp + Vector2(7, -20), sp + Vector2(-7, -20)]), Color("1d4fb8"))
+	_c.draw_line(sp + Vector2(-2, -23), sp + Vector2(-2, -32), Color.WHITE, 2.0)
 
 
 func _pad(o: Vector2) -> void:

@@ -370,6 +370,11 @@ func _build_side_buttons() -> void:
 	m.add_theme_stylebox_override("normal", _bbox(Color("2a4a8a"), 18, 6))
 	m.add_theme_stylebox_override("hover", _bbox(Color("3560a8"), 18, 6))
 	box.add_child(m)
+	var emp := _button("Império", _open_tab.bind("prestige"), 16)
+	emp.custom_minimum_size = Vector2(84, 48)
+	emp.add_theme_stylebox_override("normal", _bbox(Color("c08a1a"), 18, 6))
+	emp.add_theme_stylebox_override("hover", _bbox(Color("d69c22"), 18, 6))
+	box.add_child(emp)
 	sound_btn = _button("", _toggle_sound, 16)
 	sound_btn.custom_minimum_size = Vector2(84, 48)
 	sound_btn.add_theme_stylebox_override("normal", _bbox(Color("2a4a8a"), 18, 6))
@@ -443,6 +448,9 @@ func _rebuild_window() -> void:
 			_build_offline()
 		"customer":
 			_build_customer()
+		"prestige":
+			window_title.text = "Império e Prestígio"
+			_build_prestige()
 	_let_scroll(window_body)
 
 
@@ -513,6 +521,8 @@ func _build_upgrades() -> void:
 	var a := Game.attract_level()
 	_upgrade_row("attract", "Nível %d" % a, "Nível %d" % (a + 1))
 	_upgrade_row("comfort", "Rejeição %.2f" % Game.price_sensitivity(), "mais tolerância")
+	var gl := int(Game.lvl.get("garage", 0))
+	_upgrade_row("garage", "%d andares (%d vagas)" % [gl, Game.garage_spots()], "%d andares" % (gl + 1))
 	var info := _label("", 17, C_MUTED)
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	window_body.add_child(info)
@@ -887,13 +897,152 @@ func _build_expansion() -> void:
 		row.add_child(text)
 		if i < Game.districts_unlocked:
 			row.add_child(_label("Desbloqueado", 20, C_GREEN_TEXT))
+			if i >= 1:
+				_lot_card(i)
 		elif i == Game.districts_unlocked:
-			var btn := _button(Game.money_str(float(d.cost)), func(): _after_action(Game.buy_next_district()), 20)
+			var btn := _button(Game.money_str(Game.next_district_cost()), func(): _after_action(Game.buy_next_district()), 20)
 			btn.custom_minimum_size = Vector2(170, 64)
 			row.add_child(btn)
-			refreshers.append(func(): btn.disabled = Game.money < float(d.cost))
+			refreshers.append(func(): btn.disabled = Game.money < Game.next_district_cost())
 		else:
 			row.add_child(_label("Bloqueado", 20, C_MUTED))
+
+
+## Estacionamento de um bairro: construir, aumentar vagas e virar edifício-garagem.
+func _lot_card(d: int) -> void:
+	var card := _card()
+	card.add_theme_stylebox_override("panel", _box(Color(0.1, 0.2, 0.32), 14, 12))
+	window_body.add_child(card)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	card.add_child(v)
+	var title := _label("", 19, C_GOLD)
+	v.add_child(title)
+	var info := _label("", 16, C_MUTED)
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(info)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	v.add_child(row)
+	var b1 := _button("", func(): _after_action(Game.buy_lot(d)), 16)
+	b1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b1.custom_minimum_size = Vector2(0, 52)
+	row.add_child(b1)
+	var b2 := _button("", func(): _after_action(Game.buy_lot_floor(d)), 16)
+	b2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b2.custom_minimum_size = Vector2(0, 52)
+	b2.add_theme_stylebox_override("normal", _bbox(Color("2f6fe0")))
+	row.add_child(b2)
+	var refresh := func():
+		var l := Game.lot_lvl(d)
+		if l == 0:
+			title.text = "Estacionamento do bairro: não construído"
+			info.text = "Atende a demanda local do bairro e rende sozinho."
+			b1.text = "Construir  " + Game.money_str(Game.lot_cost(d))
+			b2.visible = false
+		else:
+			var fl := Game.lot_floors(d)
+			title.text = "Estacionamento do bairro: %d vagas%s" % [Game.lot_capacity(d), ("  |  garagem %d andares" % fl) if fl > 0 else ""]
+			info.text = "Rende %s/h" % Game.money_str(Game.lot_income_at(d, Game.price()) * 3600.0)
+			b1.text = ("+10 vagas  " + Game.money_str(Game.lot_cost(d))) if l < Game.lot_max_lvl() else "Vagas no máximo"
+			b2.visible = true
+			if l < 3:
+				b2.text = "Garagem: nível 3"
+				b2.disabled = true
+			else:
+				b2.text = ("+1 andar  " + Game.money_str(Game.lot_floor_cost(d))) if fl < 8 else "Andares no máximo"
+				b2.disabled = not Game.can_buy_lot_floor(d)
+		b1.disabled = not Game.can_buy_lot(d)
+	refresh.call()
+	refreshers.append(refresh)
+
+
+# ---------------------------------------------------------------- Prestígio
+
+func _build_prestige() -> void:
+	var head := _card()
+	head.add_theme_stylebox_override("panel", _box(Color("3a2a10"), 16, 14))
+	window_body.add_child(head)
+	var hv := VBoxContainer.new()
+	hv.add_theme_constant_override("separation", 6)
+	head.add_child(hv)
+	var pts := _label("", 26, C_GOLD)
+	hv.add_child(pts)
+	var desc := _label("Venda o império para um grande grupo investidor: você recomeça a cidade do zero, mas ganha Pontos de Prestígio para upgrades permanentes. Gemas, conquistas e upgrades de prestígio ficam com você.", 16, C_MUTED)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hv.add_child(desc)
+	var gain := _label("", 19, C_GREEN_TEXT)
+	gain.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hv.add_child(gain)
+	var sell := _button("Vender o império", _confirm_prestige, 20)
+	sell.custom_minimum_size = Vector2(0, 58)
+	sell.add_theme_stylebox_override("normal", _bbox(Color("c08a1a")))
+	sell.add_theme_stylebox_override("hover", _bbox(Color("d69c22")))
+	hv.add_child(sell)
+	var href := func():
+		pts.text = "Pontos de Prestígio: %d" % Game.prestige_points
+		var g := Game.prestige_gain()
+		if g >= 1:
+			gain.text = "Vendendo agora você ganha +%d pontos. (Vendas feitas: %d)" % [g, Game.prestige_count]
+		else:
+			gain.text = "Fature mais para poder vender: o 1º ponto vem com R$ 2 milhões faturados. (Faturado: %s)" % Game.money_str(Game.total_earned)
+		sell.disabled = g < 1
+	href.call()
+	refreshers.append(href)
+	for tier in [1, 2, 3, 4]:
+		var unlocked := Game.tier_unlocked(tier)
+		var th := _label("Nível %d: %s" % [tier, Game.TIER_NAMES[tier]] + ("" if unlocked else "  (invista %d pontos para abrir)" % int(Game.TIER_REQ[tier])), 22, C_GOLD if unlocked else C_MUTED)
+		window_body.add_child(th)
+		for key in Game.PRESTIGE.keys():
+			var u: Dictionary = Game.PRESTIGE[key]
+			if int(u.tier) != tier:
+				continue
+			var card := _card()
+			if not unlocked:
+				card.modulate = Color(1, 1, 1, 0.55)
+			window_body.add_child(card)
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 10)
+			card.add_child(row)
+			var text := VBoxContainer.new()
+			text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			text.add_child(_label("%s  (%d/%d)" % [u.name, Game.plvl(key), int(u.max)], 20))
+			var dl := _label(u.desc, 16, C_MUTED)
+			dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			text.add_child(dl)
+			row.add_child(text)
+			var btn := _button("", func(): _after_action(Game.buy_prestige(key)), 18)
+			btn.custom_minimum_size = Vector2(130, 60)
+			btn.add_theme_stylebox_override("normal", _bbox(Color("c08a1a")))
+			row.add_child(btn)
+			var r := func():
+				if Game.plvl(key) >= int(u.max):
+					btn.text = "MÁXIMO"
+					btn.disabled = true
+				else:
+					btn.text = "%d pts" % Game.prestige_cost(key)
+					btn.disabled = not Game.can_buy_prestige(key)
+			r.call()
+			refreshers.append(r)
+
+
+func _confirm_prestige() -> void:
+	window_title.text = "Vender o império?"
+	refreshers.clear()
+	for c in window_body.get_children():
+		c.queue_free()
+	_hint("Você vai recomeçar numa cidade nova (dinheiro, melhorias, bairros, serviços e funcionários zerados) e ganhar +%d Pontos de Prestígio. Tem certeza?" % Game.prestige_gain())
+	var yes := _button("Sim, vender!", _do_prestige, 22)
+	yes.add_theme_stylebox_override("normal", _bbox(Color("c08a1a")))
+	window_body.add_child(yes)
+	window_body.add_child(_button("Cancelar", func(): _rebuild_window(), 22))
+
+
+func _do_prestige() -> void:
+	if Game.do_prestige():
+		Sfx.play("build", -2.0)
+	current_tab = "prestige"
+	_rebuild_window()
 
 
 func _draw_stars() -> void:

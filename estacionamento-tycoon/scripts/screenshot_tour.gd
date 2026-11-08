@@ -31,7 +31,7 @@ func _world():
 
 func _tabs(prefix: String) -> void:
 	var ui = _ui()
-	for tab in ["upgrades", "business", "city", "research", "expansion", "missions"]:
+	for tab in ["upgrades", "business", "city", "research", "expansion", "missions", "prestige"]:
 		ui.open_tab(tab)
 		await _wait(1.0)
 		await _shot("%s_%s" % [prefix, tab])
@@ -59,7 +59,8 @@ func _run() -> void:
 	await _tabs("02_inicio")
 
 	# Cidade em crescimento
-	Game.lvl = {"spots": 6, "attract": 5, "comfort": 4, "fleet": 5, "city": 8, "jobs": 8}
+	Game.lvl = {"spots": 6, "attract": 5, "comfort": 4, "fleet": 5, "city": 8, "jobs": 8, "garage": 2}
+	Game.lots = {"1": {"lvl": 2, "floors": 0}}
 	Game.hour = 12.5
 	Game.price_value = 14.0
 	Game.services = {"wash": 2, "cafe": 1}
@@ -87,7 +88,9 @@ func _run() -> void:
 	await _tabs("04_crescimento")
 
 	# Metrópole
-	Game.lvl = {"spots": 18, "attract": 14, "comfort": 12, "fleet": 12, "city": 16, "jobs": 16}
+	Game.lvl = {"spots": 18, "attract": 14, "comfort": 12, "fleet": 12, "city": 16, "jobs": 16, "garage": 5}
+	Game.lots = {"1": {"lvl": 6, "floors": 3}, "2": {"lvl": 4, "floors": 0}, "3": {"lvl": 3, "floors": 1}}
+	Game.prestige_points = 12
 	Game.hour = 17.6
 	Game.price_value = 26.0
 	Game.services = {"wash": 5, "cafe": 4, "ev": 3, "tire": 2}
@@ -103,6 +106,12 @@ func _run() -> void:
 	await _wait(16.0)
 	await _shot("05_metropole")
 	await _tabs("06_metropole")
+	# edifício-garagem
+	var gp = _world().garage_points()
+	var gpos: Vector2 = gp[1]
+	_world().camera.focus(Vector2((gpos.x - gpos.y) * 32.0, (gpos.x + gpos.y) * 16.0 - 60.0), 1.0, true)
+	await _wait(1.5)
+	await _shot("09_garagem")
 	# serviços e funcionários no fundo do estacionamento
 	_world().camera.focus(Vector2((24.0 - 29.5) * 32.0, (24.0 + 29.5) * 16.0), 1.2, true)
 	await _wait(1.5)

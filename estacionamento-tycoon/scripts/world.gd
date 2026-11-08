@@ -61,6 +61,11 @@ var _last_block_node = null
 var _lot_key := ""
 var _beach_built := false
 var crowd = null
+var _gb := Vector2i(1, 2)        # quarteirão do edifício-garagem
+var _g_side := "left"
+var _lot_block := {}              # bairro -> quarteirão com o estacionamento do bairro
+var _lot_text_acc := 0.0
+var cars: Array = []              # carros ativos (para manter distância)
 var _collect = null          # quando não é null, _prop() junta aqui em vez de criar nós
 var _entry_gate = null
 var _exit_gate = null
@@ -162,6 +167,24 @@ func _assign_districts() -> void:
 		block_district[ring1[i]] = i / 4
 	for i in ring2.size():
 		block_district[ring2[i]] = 3 + i / 5
+	# edifício-garagem num quarteirão do Centro vizinho ao estacionamento (lado de trás)
+	for cand in [[Vector2i(1, 2), "left"], [Vector2i(1, 3), "left"], [Vector2i(2, 1), "top"], [Vector2i(3, 1), "top"]]:
+		if block_district.get(cand[0], -1) == 0:
+			_gb = cand[0]
+			_g_side = cand[1]
+			break
+	# estacionamento de cada bairro: o quarteirão do bairro mais perto do centro
+	for dd in range(1, Game.DISTRICTS.size()):
+		var best = null
+		var best_d := 1e9
+		for bb in block_district.keys():
+			if block_district[bb] == dd:
+				var dist2 := Vector2(bb.x - 2.5, bb.y - 2.5).length()
+				if dist2 < best_d:
+					best_d = dist2
+					best = bb
+		if best != null:
+			_lot_block[dd] = best
 	district_centers.clear()
 	for dist in Game.DISTRICTS.size():
 		var sum := Vector2.ZERO
@@ -202,7 +225,7 @@ func _dev(dist: int) -> float:
 func _rebuild() -> void:
 	if spot_cars.size() != Game.spots():
 		spot_cars.resize(Game.spots())
-	var gkey := "%d|%d" % [Game.spots(), Game.districts_unlocked]
+	var gkey := "%d|%d" % [Game.surface_spots(), Game.districts_unlocked]
 	if gkey != _ground_key:
 		_ground_key = gkey
 		queue_redraw()
@@ -214,7 +237,7 @@ func _rebuild() -> void:
 			_block_keys[b] = k
 			if not _pending_blocks.has(b):
 				_pending_blocks.append(b)
-	var lkey := "%d|%d|%s|%s|%d" % [int(Game.lvl.attract), Game.spots() / 48, str(Game.services), str(Game.staff), Game.phase_index()]
+	var lkey := "%d|%d|%s|%s|%d" % [int(Game.lvl.attract), Game.surface_spots() / 48, str(Game.services), str(Game.staff), Game.phase_index()]
 	if lkey != _lot_key:
 		_lot_key = lkey
 		for n in _static_nodes:
@@ -234,7 +257,12 @@ func _block_key(b: Vector2i) -> String:
 	var locked := dist >= Game.districts_unlocked
 	if locked:
 		return "L"
-	return "%d|%d" % [int(_dev(dist) * 20.0), Game.phase_index()]
+	var extra := ""
+	if b == _gb:
+		extra += "g%d" % int(Game.lvl.get("garage", 0))
+	if _lot_block.has(dist) and _lot_block[dist] == b:
+		extra += "l%d/%d" % [Game.lot_lvl(dist), Game.lot_floors(dist)]
+	return "%d|%d|%s" % [int(_dev(dist) * 20.0), Game.phase_index(), extra]
 
 
 ## Reconstrói até `n` quarteirões pendentes por quadro.
@@ -353,7 +381,25 @@ func _build_block(b: Vector2i) -> void:
 	if not locked:
 		_tree(ox + 0.15, oy + 0.15, br, true)
 		_tree(ox + 6.85, oy + 6.85, br, true)
+	var skip := []
+	if b == _gb and int(Game.lvl.get("garage", 0)) > 0:
+		skip = [1, 3] if _g_side == "left" else [2, 3]
+		var gx := ox + 3.6 if _g_side == "left" else ox + 0.4
+		var gy := oy + 0.4 if _g_side == "left" else oy + 3.6
+		var gw := 3.1 if _g_side == "left" else 6.2
+		var gd := 6.2 if _g_side == "left" else 3.1
+		var gar = _prop("parking_garage", gx, gy, gw, gd)
+		gar.floors = int(Game.lvl.garage)
+		gar.seed_value = 7
+	if _lot_block.get(dist, null) == b and Game.lot_lvl(dist) > 0:
+		skip.append(0)
+		var kind := "parking_garage" if Game.lot_floors(dist) > 0 else "district_lot"
+		var lp = _prop(kind, ox + 0.35, oy + 0.35, 3.0, 3.0)
+		lp.floors = Game.lot_floors(dist) if Game.lot_floors(dist) > 0 else Game.lot_lvl(dist)
+		lp.seed_value = dist * 31
 	for pi in 4:
+		if skip.has(pi):
+			continue
 		var px := ox + 0.4 + (pi % 2) * 3.3
 		var py := oy + 0.4 + (pi / 2) * 3.3
 		var r := br.randf()
@@ -411,7 +457,7 @@ func _build_block(b: Vector2i) -> void:
 
 func _build_lot_props() -> void:
 	var a := int(Game.lvl.attract)
-	var units := ceili(float(Game.spots()) / (SPOTS_PER_ROW * 2))
+	var units := ceili(float(Game.surface_spots()) / (SPOTS_PER_ROW * 2))
 	# cabine na ilha entre a entrada e a saída (fora do caminho dos carros)
 	_prop("booth", 24.6, LOT.position.y + 0.06, 0.55, 0.35)
 	_entry_gate = _prop("gate", 24.45, LOT.position.y + 0.12, -1.15, 0.0)
@@ -540,7 +586,24 @@ func _build_beach(br: RandomNumberGenerator) -> void:
 
 # ---------------------------------------------------------------- Vagas
 
+func is_garage_spot(i: int) -> bool:
+	return i >= Game.surface_spots()
+
+
+## Ponto da rua em frente ao edifício-garagem e ponto dentro dele.
+func garage_points() -> Array:
+	var ox: float = _gb.x * 8 + 1.0
+	var oy: float = _gb.y * 8 + 1.0
+	if _g_side == "top":
+		var xm := ox + 5.2
+		return [Vector2(xm, 16.5), Vector2(xm, oy + 6.2)]
+	var ym := oy + 3.5
+	return [Vector2(16.5, ym), Vector2(ox + 6.2, ym)]
+
+
 func spot_center(i: int) -> Vector2:
+	if is_garage_spot(i):
+		return garage_points()[1]
 	var u := i / (SPOTS_PER_ROW * 2)
 	var k := i % (SPOTS_PER_ROW * 2)
 	var row := k / SPOTS_PER_ROW
@@ -565,6 +628,8 @@ func _process(delta: float) -> void:
 		_try_arrival(false)
 	_update_daylight()
 	_process_pending(2)
+	_keep_distance()
+	_lot_texts(delta)
 	_update_gates(delta)
 	# carros que passam na frente do estacionamento sem entrar
 	_passer_acc += minf(Game.passing_per_sec() * (1.0 - Game.enter_chance()), 1.0) * delta
@@ -663,6 +728,64 @@ func car_at(world_pos: Vector2):
 	return best
 
 
+## Carros mantêm distância do carro da frente na mesma faixa (sem se atravessar).
+func _keep_distance() -> void:
+	var cells := {}
+	var moving: Array = []
+	for c in cars:
+		if not is_instance_valid(c) or not c.is_processing() or not c.visible:
+			continue
+		moving.append(c)
+		var key := Vector2i(int(floor(c.grid.x)), int(floor(c.grid.y)))
+		if not cells.has(key):
+			cells[key] = []
+		cells[key].append(c)
+	for c in moving:
+		var g: Vector2 = c.grid
+		var dir: Vector2 = c.dir
+		var blocked := false
+		var cx := int(floor(g.x))
+		var cy := int(floor(g.y))
+		for ox in range(-1, 2):
+			if blocked:
+				break
+			for oy in range(-1, 2):
+				var list = cells.get(Vector2i(cx + ox, cy + oy), null)
+				if list == null:
+					continue
+				for o in list:
+					if o == c:
+						continue
+					var d: Vector2 = o.grid - g
+					var along := d.dot(dir)
+					if along <= 0.02 or along > 0.62:
+						continue
+					if absf(d.x * dir.y - d.y * dir.x) > 0.16:
+						continue
+					if (o.dir as Vector2).dot(dir) < -0.5:
+						continue
+					blocked = true
+					break
+				if blocked:
+					break
+		c.hold = blocked
+
+
+func _lot_texts(delta: float) -> void:
+	_lot_text_acc += delta
+	if _lot_text_acc < 4.0:
+		return
+	_lot_text_acc = 0.0
+	if camera.zoom.x < 0.4:
+		return
+	for dd in _lot_block.keys():
+		if Game.lot_lvl(dd) > 0 and dd < Game.districts_unlocked:
+			var b: Vector2i = _lot_block[dd]
+			var amount := Game.lot_income_at(dd, Game.price()) * 4.0
+			if amount >= 1.0:
+				_floating_text("+" + Game.money_str(amount), Iso.p(b.x * 8 + 2.8, b.y * 8 + 2.8, 40.0), Color("7dff7a"), true)
+
+
 func _try_arrival(worker: bool) -> void:
 	var idx := _free_spot()
 	if idx == -1:
@@ -708,6 +831,7 @@ func _new_car(start: Vector2):
 	var car = CarScript.new()
 	objects.add_child(car)
 	car.setup(rng, start)
+	cars.append(car)
 	if VEHICLE_SPRITES.has(car.kind):
 		var list: Array = VEHICLE_SPRITES[car.kind]
 		var model: String = list[rng.randi_range(0, list.size() - 1)]
@@ -721,6 +845,7 @@ func _new_car(start: Vector2):
 
 
 func _despawn(car) -> void:
+	cars.erase(car)
 	var tw = car.create_tween()
 	tw.tween_property(car, "modulate:a", 0.0, 0.4)
 	tw.tween_callback(car.queue_free)
@@ -825,8 +950,43 @@ func _exit_road() -> Array:
 	return _lane([Vector2(EXIT_X, 16.5), Vector2(r, 16.5), Vector2(r, 0.5)])
 
 
+func _arrival_road_to(tx: float, tail: Array = []) -> Array:
+	var pts: Array = []
+	match rng.randi_range(0, 3):
+		0:
+			pts = [Vector2(0.5, 16.5), Vector2(tx, 16.5)]
+		1:
+			pts = [Vector2(MAP - 0.5, 16.5), Vector2(tx, 16.5)]
+		_:
+			var r := _rand_road()
+			pts = [Vector2(r, 0.5), Vector2(r, 16.5), Vector2(tx, 16.5)]
+	pts.append_array(tail)
+	return _lane(pts)
+
+
+func _exit_road_from(head: Array, sx: float) -> Array:
+	var pts: Array = head.duplicate()
+	match rng.randi_range(0, 3):
+		0:
+			pts.append_array([Vector2(sx, 16.5), Vector2(0.5, 16.5)])
+		1:
+			pts.append_array([Vector2(sx, 16.5), Vector2(MAP - 0.5, 16.5)])
+		_:
+			var r := _rand_road()
+			pts.append_array([Vector2(sx, 16.5), Vector2(r, 16.5), Vector2(r, 0.5)])
+	return _lane(pts)
+
+
 func _spawn_arrival(idx: int, worker: bool) -> void:
-	var road := _arrival_road()
+	var garage := is_garage_spot(idx)
+	var gp := garage_points()
+	var road: Array
+	if not garage:
+		road = _arrival_road()
+	elif _g_side == "top":
+		road = _arrival_road_to(gp[0].x)
+	else:
+		road = _arrival_road_to(16.5, [gp[0]])
 	var car = _new_car(road[0])
 	if car.kind == 2:
 		car.kind = 0
@@ -842,12 +1002,16 @@ func _spawn_arrival(idx: int, worker: bool) -> void:
 	var c := spot_center(idx)
 	var aisle := spot_aisle(idx)
 	var pts: Array = road.slice(1)
-	pts.append_array([
-		Vector2(ENTRY_X, TOP_AISLE_Y), Vector2(LEFT_LANE_X, TOP_AISLE_Y),
-		Vector2(LEFT_LANE_X, aisle), Vector2(c.x, aisle), c])
+	if garage:
+		pts.append(c)
+		car.status = "Indo para o edifício-garagem"
+	else:
+		pts.append_array([
+			Vector2(ENTRY_X, TOP_AISLE_Y), Vector2(LEFT_LANE_X, TOP_AISLE_Y),
+			Vector2(LEFT_LANE_X, aisle), Vector2(c.x, aisle), c])
+		_entering.append(car)
 	car.arrived.connect(_on_car_parked.bind(car), CONNECT_ONE_SHOT)
 	car.go(pts, ROAD_SPEED)
-	_entering.append(car)
 
 
 func _on_car_parked(car) -> void:
@@ -856,8 +1020,12 @@ func _on_car_parked(car) -> void:
 		_despawn(car)
 		return
 	Game.car_parked()
-	car.status = "Estacionado"
-	_driver_walks(car)
+	if is_garage_spot(idx):
+		car.visible = false
+		car.status = "Estacionado no edifício-garagem"
+	else:
+		car.status = "Estacionado"
+		_driver_walks(car)
 	var base: float = (Game.STAY_WORK_SECONDS if car.worker else Game.STAY_SHOP_SECONDS) * Game.stay_factor()
 	var stay := rng.randf_range(base * 0.7, base * 1.3)
 	get_tree().create_timer(stay).timeout.connect(_car_leave.bind(car))
@@ -898,17 +1066,28 @@ func _car_leave(car) -> void:
 		var e: Array = extra[i]
 		_floating_text("+%s %s" % [Game.money_str(e[1]), e[0]], Iso.pg(car.grid, 44.0 + 16.0 * i), Color("7fe7ff"))
 		car.spent += float(e[1])
-	var aisle := spot_aisle(idx)
-	var pts: Array = [
-		Vector2(car.grid.x, aisle), Vector2(RIGHT_LANE_X, aisle),
-		Vector2(RIGHT_LANE_X, TOP_AISLE_Y), Vector2(EXIT_X, TOP_AISLE_Y)]
-	pts.append_array(_exit_road())
+	var pts: Array = []
+	if idx >= 0 and is_garage_spot(idx):
+		var gp := garage_points()
+		car.visible = true
+		car.grid = gp[1]
+		if _g_side == "top":
+			pts = _exit_road_from([gp[1], gp[0]], gp[0].x)
+		else:
+			pts = _exit_road_from([gp[1], gp[0]], 16.5)
+		pts = pts.slice(1)
+	else:
+		var aisle := spot_aisle(idx)
+		pts = [
+			Vector2(car.grid.x, aisle), Vector2(RIGHT_LANE_X, aisle),
+			Vector2(RIGHT_LANE_X, TOP_AISLE_Y), Vector2(EXIT_X, TOP_AISLE_Y)]
+		pts.append_array(_exit_road())
+		_leaving.append(car)
 	if idx >= 0 and idx < spot_cars.size() and spot_cars[idx] == car:
 		spot_cars[idx] = null
 	car.spot_index = -1
 	car.arrived.connect(_despawn.bind(car), CONNECT_ONE_SHOT)
 	car.go(pts, LOT_SPEED)
-	_leaving.append(car)
 
 
 func _floating_text(text: String, pos: Vector2, color: Color = Color("7dff7a"), force: bool = false) -> void:
@@ -1016,7 +1195,7 @@ func _draw_ground(g) -> void:
 
 
 func _draw_lot(g, o: Vector2) -> void:
-	var units := ceili(float(Game.spots()) / (SPOTS_PER_ROW * 2))
+	var units := ceili(float(Game.surface_spots()) / (SPOTS_PER_ROW * 2))
 	var pave_end := minf(LOT.end.y - 0.1, 21.4 + 3.0 * (units - 1))
 	Iso.quad(g, o, LOT.position.x, LOT.position.y, LOT.size.x, LOT.size.y, 0, Color("5fb85a"))
 	if pave_end < LOT.end.y - 0.3:
@@ -1026,7 +1205,7 @@ func _draw_lot(g, o: Vector2) -> void:
 	Iso.quad(g, o, LOT.position.x, LOT.position.y, LOT.size.x, pave_end - LOT.position.y, 0, Color("2f3238"))
 	Iso.quad(g, o, LOT.position.x + 0.08, LOT.position.y, LOT.size.x - 0.16, pave_end - LOT.position.y - 0.08, 0, Color("43464e"))
 	var yellow := Color("f2d23a")
-	for i in Game.spots():
+	for i in Game.surface_spots():
 		var c := spot_center(i)
 		var x0 := c.x - 0.25
 		var y0 := c.y - 0.5
