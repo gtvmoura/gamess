@@ -69,6 +69,18 @@ var _lot_text_acc := 0.0
 var cars: Array = []              # carros ativos (para manter distância)
 var _arriving := 0                # carros a caminho de uma vaga
 const MAX_ARRIVING := 8
+const MAX_LEAVING := 8
+var _leaving_now: Array = []
+
+
+func _leaving_count() -> int:
+	var n := 0
+	for c in _leaving_now:
+		if is_instance_valid(c) and c.is_processing():
+			n += 1
+	if n < _leaving_now.size():
+		_leaving_now = _leaving_now.filter(func(c): return is_instance_valid(c) and c.is_processing())
+	return n
 const MAX_MOVING := 70            # teto de carros andando ao mesmo tempo
 var _moving_count := 0
 var _frame := 0
@@ -1107,8 +1119,22 @@ func _spawn_arrival(idx: int, worker: bool) -> void:
 		_on_car_parked(hid)
 		return
 	if busy:
-		road = [Vector2(ENTRY_X - 0.2, 16.7), Vector2(ENTRY_X, 16.7)]
-	elif not garage:
+		# já aparece estacionado na vaga (fade), sem ocupar a rua
+		var pc = _new_car(spot_center(idx))
+		pc.dir = Vector2(0, 1)
+		pc.spot_index = idx
+		pc.worker = worker
+		pc.cname = _random_name()
+		pc.job = JOBS[rng.randi_range(0, JOBS.size() - 1)] if worker else ERRANDS[rng.randi_range(0, ERRANDS.size() - 1)]
+		pc.hours = roundf((rng.randf_range(4.0, 8.0) if worker else rng.randf_range(1.0, 2.0)) * 2.0) / 2.0
+		if pc.kind == 2:
+			pc.kind = 0
+		pc.queue_redraw()
+		spot_cars[idx] = pc
+		_arriving += 1
+		_on_car_parked(pc)
+		return
+	if not garage:
 		road = _arrival_road()
 	elif _g_side == "top":
 		road = _arrival_road_to(gp[0].x)
@@ -1196,6 +1222,15 @@ func _car_leave(car) -> void:
 		_floating_text("+%s %s" % [Game.money_str(e[1]), e[0]], Iso.pg(car.grid, 44.0 + 16.0 * i), Color("7fe7ff"))
 		car.spent += float(e[1])
 	var pts: Array = []
+	# saída cheia: o carro sai "por trás da cena" (some com fade na vaga)
+	var exit_busy := _leaving_count() >= MAX_LEAVING
+	if exit_busy:
+		if idx >= 0 and idx < spot_cars.size() and spot_cars[idx] == car:
+			spot_cars[idx] = null
+		car.spot_index = -1
+		car.visible = car.visible and not is_garage_spot(idx)
+		_despawn(car)
+		return
 	if idx >= 0 and is_garage_spot(idx):
 		var gp := garage_points()
 		car.visible = true
@@ -1217,6 +1252,7 @@ func _car_leave(car) -> void:
 	car.spot_index = -1
 	car.arrived.connect(_despawn.bind(car), CONNECT_ONE_SHOT)
 	car.go(pts, LOT_SPEED)
+	_leaving_now.append(car)
 
 
 func _floating_text(text: String, pos: Vector2, color: Color = Color("7dff7a"), force: bool = false) -> void:
