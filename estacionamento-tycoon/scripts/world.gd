@@ -66,6 +66,9 @@ var _g_side := "left"
 var _lot_block := {}              # bairro -> quarteirão com o estacionamento do bairro
 var _lot_text_acc := 0.0
 var cars: Array = []              # carros ativos (para manter distância)
+var _arriving := 0                # carros a caminho de uma vaga
+const MAX_ARRIVING := 12
+var _frame := 0
 var _collect = null          # quando não é null, _prop() junta aqui em vez de criar nós
 var _entry_gate = null
 var _exit_gate = null
@@ -628,7 +631,9 @@ func _process(delta: float) -> void:
 		_try_arrival(false)
 	_update_daylight()
 	_process_pending(2)
-	_keep_distance()
+	_frame += 1
+	if _frame % 2 == 0:
+		_keep_distance()
 	_lot_texts(delta)
 	_update_gates(delta)
 	# carros que passam na frente do estacionamento sem entrar
@@ -637,7 +642,7 @@ func _process(delta: float) -> void:
 		_passer_acc = 0.0
 		_spawn_passer()
 	_traffic_timer += delta
-	var target := clampi(int(Game.passing_per_sec() * 3.0), 4, 22)
+	var target := clampi(int(Game.passing_per_sec() * 3.0), 4, 16)
 	if _traffic_timer >= 0.35 and traffic_count < target:
 		_traffic_timer = 0.0
 		_spawn_traffic()
@@ -981,7 +986,23 @@ func _spawn_arrival(idx: int, worker: bool) -> void:
 	var garage := is_garage_spot(idx)
 	var gp := garage_points()
 	var road: Array
-	if not garage:
+	# rua cheia: os excedentes já aparecem na entrada (ou dentro da garagem), sem engarrafar
+	var busy := _arriving >= MAX_ARRIVING
+	if busy and garage:
+		var hid = _new_car(gp[1])
+		hid.visible = false
+		hid.spot_index = idx
+		hid.worker = worker
+		hid.cname = _random_name()
+		hid.job = JOBS[rng.randi_range(0, JOBS.size() - 1)] if worker else ERRANDS[rng.randi_range(0, ERRANDS.size() - 1)]
+		hid.hours = roundf((rng.randf_range(4.0, 8.0) if worker else rng.randf_range(1.0, 2.0)) * 2.0) / 2.0
+		spot_cars[idx] = hid
+		_arriving += 1
+		_on_car_parked(hid)
+		return
+	if busy:
+		road = [Vector2(ENTRY_X - 0.2, 16.7), Vector2(ENTRY_X, 16.7)]
+	elif not garage:
 		road = _arrival_road()
 	elif _g_side == "top":
 		road = _arrival_road_to(gp[0].x)
@@ -1012,9 +1033,11 @@ func _spawn_arrival(idx: int, worker: bool) -> void:
 		_entering.append(car)
 	car.arrived.connect(_on_car_parked.bind(car), CONNECT_ONE_SHOT)
 	car.go(pts, ROAD_SPEED)
+	_arriving += 1
 
 
 func _on_car_parked(car) -> void:
+	_arriving = maxi(0, _arriving - 1)
 	var idx: int = car.spot_index
 	if idx < 0 or idx >= spot_cars.size() or spot_cars[idx] != car:
 		_despawn(car)
