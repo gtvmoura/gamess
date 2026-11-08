@@ -9,6 +9,7 @@ const C_GOLD := Color("ffd23f")
 const C_GEM := Color("d77cff")
 const C_MUTED := Color(0.75, 0.8, 0.9)
 
+var perf_us := 0.0   # tempo médio de _process (microssegundos), para medição
 var root: Control
 var world = null
 var top_bar: Control
@@ -63,6 +64,12 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	var _t0 := Time.get_ticks_usec()
+	_process_inner(delta)
+	perf_us = perf_us * 0.95 + float(Time.get_ticks_usec() - _t0) * 0.05
+
+
+func _process_inner(delta: float) -> void:
 	_refresh_acc += delta
 	if _refresh_acc >= 0.2:
 		_refresh_acc = 0.0

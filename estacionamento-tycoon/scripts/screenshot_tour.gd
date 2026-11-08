@@ -15,6 +15,21 @@ func _shot(name: String) -> void:
 	var path := out_dir.path_join(name + ".png")
 	img.save_png(path)
 	print("print salvo: ", path)
+	_perf(name)
+
+
+## Medição de desempenho (aparece no log do CI).
+func _perf(tag: String) -> void:
+	var w = _world()
+	var moving := 0
+	for c in w.cars:
+		if is_instance_valid(c) and c.is_processing():
+			moving += 1
+	print("PERF %s | fps=%d process=%.1fms draw_calls=%d objects=%d prims=%d nodes=%d | world=%.0fus crowd=%.0fus ui=%.0fus | carros=%d em_movimento=%d pedestres=%d" % [
+		tag, Performance.get_monitor(Performance.TIME_FPS), Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME),
+		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME), Performance.get_monitor(Performance.OBJECT_NODE_COUNT),
+		w.perf_us, w.crowd.perf_us, _ui().perf_us, w.cars.size(), moving, w.crowd.peds.size()])
 
 
 func _ui():

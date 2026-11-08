@@ -11,6 +11,7 @@ const REDRAW_HZ := 20.0
 const SKINS := [Color("f1c9a5"), Color("e0ac7e"), Color("c68a5c"), Color("8d5a3b"), Color("5e3a24")]
 const PANTS := [Color("2b3550"), Color("3a3a3a"), Color("5a4632"), Color("23395d"), Color("6b6b6b")]
 
+var perf_us := 0.0   # tempo médio de _process (microssegundos), para medição
 var world = null
 var rng := RandomNumberGenerator.new()
 var peds: Array = []          # cada um: Dictionary
@@ -130,6 +131,12 @@ func _next_leg(p: Dictionary) -> void:
 
 
 func _process(delta: float) -> void:
+	var _t0 := Time.get_ticks_usec()
+	_process_inner(delta)
+	perf_us = perf_us * 0.95 + float(Time.get_ticks_usec() - _t0) * 0.05
+
+
+func _process_inner(delta: float) -> void:
 	if world == null:
 		return
 	_t += delta

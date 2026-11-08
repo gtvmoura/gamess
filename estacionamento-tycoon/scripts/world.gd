@@ -36,6 +36,7 @@ const BUILDING_COLORS := ["e8d6b0", "d98c6a", "f2efe6", "c9a3d6", "9ec5e8", "e6a
 const TOWER_COLORS := ["5b8fb9", "4a6f8f", "6aa5c4", "3f5d7a", "8fb8d8", "7a8fa6"]
 const ROOF_COLORS := ["c0533a", "a8432f", "8a5a3a", "d06a3a", "6a4a6a", "3a5a8a"]
 
+var perf_us := 0.0   # tempo médio de _process (microssegundos), para medição
 var rng := RandomNumberGenerator.new()
 var ui = null
 var camera = null
@@ -67,7 +68,7 @@ var _lot_block := {}              # bairro -> quarteirão com o estacionamento d
 var _lot_text_acc := 0.0
 var cars: Array = []              # carros ativos (para manter distância)
 var _arriving := 0                # carros a caminho de uma vaga
-const MAX_ARRIVING := 12
+const MAX_ARRIVING := 8
 var _frame := 0
 var _collect = null          # quando não é null, _prop() junta aqui em vez de criar nós
 var _entry_gate = null
@@ -625,6 +626,12 @@ func spot_aisle(i: int) -> float:
 # ---------------------------------------------------------------- Simulação
 
 func _process(delta: float) -> void:
+	var _t0 := Time.get_ticks_usec()
+	_process_inner(delta)
+	perf_us = perf_us * 0.95 + float(Time.get_ticks_usec() - _t0) * 0.05
+
+
+func _process_inner(delta: float) -> void:
 	work_acc = minf(work_acc + Game.work_arrivals_per_sec() * delta, 4.0)
 	shop_acc = minf(shop_acc + Game.shop_arrivals_per_sec() * delta, 4.0)
 	while work_acc >= 1.0:
@@ -642,12 +649,12 @@ func _process(delta: float) -> void:
 	_lot_texts(delta)
 	_update_gates(delta)
 	# carros que passam na frente do estacionamento sem entrar
-	_passer_acc += minf(Game.passing_per_sec() * (1.0 - Game.enter_chance()), 1.0) * delta
+	_passer_acc += minf(Game.passing_per_sec() * (1.0 - Game.enter_chance()), 0.6) * delta
 	if _passer_acc >= 1.0:
 		_passer_acc = 0.0
 		_spawn_passer()
 	_traffic_timer += delta
-	var target := clampi(int(Game.passing_per_sec() * 3.0), 4, 16)
+	var target := clampi(int(Game.passing_per_sec() * 3.0), 4, 12)
 	if _traffic_timer >= 0.35 and traffic_count < target:
 		_traffic_timer = 0.0
 		_spawn_traffic()
