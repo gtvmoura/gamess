@@ -58,10 +58,10 @@ func _initialize() -> void:
 	check(g.upgrade_cost("spots") > cost, "custo sobe a cada nível")
 
 	# Bairros
-	var pop_before: float = g.population()
+	var pop_before: float = g.housing()
 	g.money = 20000.0
 	check(g.buy_next_district(), "desbloqueia Vila Nova")
-	check(g.population() > pop_before, "bairro aumenta a população")
+	check(g.housing() > pop_before, "bairro aumenta a moradia")
 	check(g.district_income_mult() > 1.0, "bairro aumenta a receita")
 
 	# Moradores x empregos
