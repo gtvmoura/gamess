@@ -114,7 +114,7 @@ func _make_theme() -> Theme:
 	if font_file != null:
 		var fv := FontVariation.new()
 		fv.base_font = font_file
-		fv.variation_opentype = {TextServer.name_to_tag("wght"): 560}
+		fv.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("wght"): 560}
 		t.default_font = fv
 	t.default_font_size = 24
 	t.set_color("font_color", "Label", Color.WHITE)

@@ -15,7 +15,7 @@ func check(cond: bool, msg: String) -> void:
 
 func _initialize() -> void:
 	print("== Testes Estacionamento Tycoon ==")
-	for path in ["res://scripts/game_state.gd", "res://scripts/car.gd"]:
+	for path in ["res://scripts/game_state.gd", "res://scripts/car.gd", "res://scripts/iso.gd", "res://scripts/batch.gd", "res://scripts/prop.gd", "res://scripts/walker.gd", "res://scripts/camera.gd"]:
 		var s = load(path)
 		check(s != null and s.can_instantiate(), "script compila: " + path)
 
@@ -125,6 +125,7 @@ func _initialize() -> void:
 	g.rating = 1.0
 	check(g.enter_chance() < ch5, "avaliação baixa reduz a entrada")
 	g.rating = 3.5
+	g.total_cars = maxi(g.total_cars, 1)
 	g.check_achievements()
 	check(g.achievements.has("first"), "conquista do primeiro cliente")
 	var gems_a: int = g.gems
