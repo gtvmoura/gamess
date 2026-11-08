@@ -25,13 +25,27 @@ func _wait(seconds: float) -> void:
 	await get_tree().create_timer(seconds).timeout
 
 
+func _world():
+	return get_tree().current_scene.get_node("World")
+
+
 func _tabs(prefix: String) -> void:
 	var ui = _ui()
 	for tab in ["upgrades", "city", "expansion", "missions"]:
-		ui._open_tab(tab)
-		await _wait(0.5)
+		ui.open_tab(tab)
+		await _wait(1.0)
 		await _shot("%s_%s" % [prefix, tab])
 	ui.close_window()
+	var w = _world()
+	w.show_map()
+	await _wait(1.0)
+	await _shot("%s_mapa" % prefix)
+	w.camera.focus(w.camera.position, 0.55, true)
+	w.focus_district(0)
+	await _wait(1.0)
+	await _shot("%s_zoom_cidade" % prefix)
+	w.focus_lot(true)
+	await _wait(0.5)
 
 
 func _run() -> void:

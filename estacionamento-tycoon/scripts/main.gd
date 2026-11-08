@@ -12,6 +12,9 @@ func _ready() -> void:
 	var ui = UIScript.new()
 	ui.name = "UI"
 	add_child(ui)
+	ui.world = world
+	world.ui = ui
+	world.camera.ui = ui
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshots="):
 			var tour = load("res://scripts/screenshot_tour.gd").new()

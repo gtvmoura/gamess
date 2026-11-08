@@ -1,102 +1,368 @@
 extends Node2D
-## Mundo do jogo: cidade ao fundo, rua com trânsito e o estacionamento com carros.
+## Mundo isométrico: cidade em quarteirões, ruas, estacionamento no centro,
+## carros, pedestres, bairros bloqueados e a câmera.
 
+const Iso := preload("res://scripts/iso.gd")
 const CarScript := preload("res://scripts/car.gd")
+const PropScript := preload("res://scripts/prop.gd")
+const WalkerScript := preload("res://scripts/walker.gd")
+const CameraScript := preload("res://scripts/camera.gd")
 
-const ROAD_TOP := 410.0
-const LANE_RIGHT_Y := 432.0   # carros indo para a direita
-const LANE_LEFT_Y := 472.0    # carros indo para a esquerda (os que entram)
-const ROAD_BOTTOM := 494.0
-const LOT := Rect2(30, 520, 660, 600)
-const LEFT_LANE_X := 62.0
-const RIGHT_LANE_X := 658.0
-const SPOTS_X0 := 96.0
-const SPOTS_X1 := 624.0
-const ENTRY_X := 420.0
-const EXIT_X := 300.0
-const OFFSCREEN := 140.0
-const STAY_SECONDS := 12.0  # igual a Game.AVG_STAY_SECONDS
+const MAP := 49.0                 # tamanho do mapa em casas
+const NB := 6                     # 6x6 quarteirões, ruas a cada 8 casas
+const ROADS := [0.5, 8.5, 16.5, 24.5, 32.5, 40.5, 48.5]  # linhas centrais das ruas
+const LOT := Rect2(17, 17, 15, 15)
+const LOT_BLOCKS := [Vector2i(2, 2), Vector2i(2, 3), Vector2i(3, 2), Vector2i(3, 3)]
+const ENTRY_X := 23.5
+const EXIT_X := 26.5
+const LEFT_LANE_X := 18.25
+const RIGHT_LANE_X := 31.5
+const TOP_AISLE_Y := 17.5
+const SPOTS_PER_ROW := 24
+const LANE := 0.2
+const STAY_SECONDS := 12.0        # igual a Game.AVG_STAY_SECONDS
+const ROAD_SPEED := 3.2
+const LOT_SPEED := 2.2
+
+const BUILDING_COLORS := ["e8d6b0", "d98c6a", "f2efe6", "c9a3d6", "9ec5e8", "e6a8a8", "b5d6a8", "f2c879", "f0b48a", "d6d0c4"]
+const TOWER_COLORS := ["5b8fb9", "4a6f8f", "6aa5c4", "3f5d7a", "8fb8d8", "7a8fa6"]
+const ROOF_COLORS := ["c0533a", "a8432f", "8a5a3a", "d06a3a", "6a4a6a", "3a5a8a"]
 
 var rng := RandomNumberGenerator.new()
-var spot_pos: Array[Vector2] = []
-var aisle_y: Array[float] = []   # y do corredor de cada vaga
-var spot_size := Vector2(30, 54)
-var spot_cars: Array = []        # Car ou null por vaga
+var ui = null
+var camera = null
+var objects: Node2D
+var fx: Node2D
+var overlay: Node2D
+var tint: CanvasModulate
+var spot_cars: Array = []
+var block_district := {}            # Vector2i -> índice do bairro
+var district_centers: Array = []    # Vector2 (grade) por bairro
 var arrival_acc := 0.0
-var traffic_acc := 0.0
-var _layout_spots := -1
+var traffic_count := 0
+var _traffic_timer := 0.0
+var _fx_budget := 4.0
 var _city_key := ""
-var _buildings: Array = []
-var _trees: Array = []
-var _time := 0.0
-
-@onready var cars_layer := Node2D.new()
-@onready var fx_layer := Node2D.new()
+var _ground_key := ""
+var _static_nodes: Array = []
 
 
 func _ready() -> void:
 	rng.randomize()
-	add_child(cars_layer)
-	add_child(fx_layer)
-	_relayout()
-	_rebuild_city()
-	Game.changed.connect(_on_game_changed)
+	_assign_districts()
+	tint = CanvasModulate.new()
+	add_child(tint)
+	objects = Node2D.new()
+	objects.y_sort_enabled = true
+	add_child(objects)
+	overlay = Node2D.new()
+	overlay.z_index = 5
+	overlay.draw.connect(_draw_overlay)
+	add_child(overlay)
+	fx = Node2D.new()
+	fx.z_index = 10
+	add_child(fx)
+	var pin = PropScript.new()
+	pin.setup("pin", LOT.get_center().x, LOT.position.y + 3.0)
+	fx.add_child(pin)
+	camera = CameraScript.new()
+	camera.name = "Camera"
+	add_child(camera)
+	var left := Iso.p(0, MAP).x
+	var right := Iso.p(MAP, 0).x
+	camera.bounds = Rect2(left, 0, right - left, Iso.p(MAP, MAP).y)
+	camera.tapped.connect(_on_tapped)
+	camera.make_current()
+	focus_lot(true)
+	spot_cars.resize(Game.spots())
+	_rebuild()
+	Game.changed.connect(_rebuild)
+	for i in 8:
+		_spawn_traffic()
 
 
-func _on_game_changed() -> void:
-	if Game.spots() != _layout_spots:
-		_relayout()
-	_rebuild_city()
+# ---------------------------------------------------------------- Câmera
+
+func focus_lot(instant: bool = false) -> void:
+	camera.focus(Iso.p(LOT.get_center().x, LOT.position.y + 4.0), 0.9, instant)
 
 
-# ---------------------------------------------------------------- Layout
-
-func _relayout() -> void:
-	var n := Game.spots()
-	_layout_spots = n
-	var width := SPOTS_X1 - SPOTS_X0
-	var height := LOT.size.y - 30.0
-	var cols := 4
-	var sw := 0.0
-	var sh := 0.0
-	var aisle := 0.0
-	while true:
-		sw = width / cols
-		sh = sw * 1.75
-		aisle = maxf(sw * 1.1, 34.0)
-		var rows := ceili(float(n) / cols)
-		if rows * (aisle + sh) <= height or cols >= 40:
-			break
-		cols += 1
-	spot_size = Vector2(sw, sh)
-	spot_pos.clear()
-	aisle_y.clear()
-	for i in n:
-		var r := i / cols
-		var c := i % cols
-		var top := LOT.position.y + 10.0 + r * (aisle + sh)
-		aisle_y.append(top + aisle / 2.0)
-		spot_pos.append(Vector2(SPOTS_X0 + (c + 0.5) * sw, top + aisle + sh / 2.0))
-	spot_cars.resize(n)
-	var car_size := _car_size()
-	for i in n:
-		var car = spot_cars[i]
-		if car != null and is_instance_valid(car):
-			car.set_car_size(car_size)
-			if not car.is_processing():
-				car.position = spot_pos[i]
-	queue_redraw()
+func show_map() -> void:
+	camera.focus(Iso.p(MAP / 2.0, MAP / 2.0), 0.3, false)
 
 
-func _car_size() -> Vector2:
-	return Vector2(minf(spot_size.x * 0.72, 26.0), minf(spot_size.y * 0.8, 46.0))
+func focus_district(i: int) -> void:
+	if i >= 0 and i < district_centers.size():
+		var c: Vector2 = district_centers[i]
+		camera.focus(Iso.pg(c), 0.55, false)
+
+
+func _on_tapped(world_pos: Vector2) -> void:
+	if ui == null:
+		return
+	var g := Iso.to_grid(world_pos)
+	if LOT.has_point(g):
+		ui.open_tab("upgrades")
+		return
+	var b := Vector2i(int(floor(g.x / 8.0)), int(floor(g.y / 8.0)))
+	if block_district.has(b):
+		var dist: int = block_district[b]
+		ui.open_tab("expansion" if dist >= Game.districts_unlocked else "city")
+
+
+# ---------------------------------------------------------------- Bairros
+
+func _assign_districts() -> void:
+	var ring1: Array = []
+	var ring2: Array = []
+	for bx in NB:
+		for by in NB:
+			var b := Vector2i(bx, by)
+			if LOT_BLOCKS.has(b):
+				continue
+			var ring := maxf(absf(bx - 2.5), absf(by - 2.5))
+			if ring < 2.0:
+				ring1.append(b)
+			else:
+				ring2.append(b)
+	ring1.sort_custom(func(a, b): return _block_angle(a) < _block_angle(b))
+	ring2.sort_custom(func(a, b): return _block_angle(a) < _block_angle(b))
+	for i in ring1.size():
+		block_district[ring1[i]] = i / 4
+	for i in ring2.size():
+		block_district[ring2[i]] = 3 + i / 5
+	district_centers.clear()
+	for dist in Game.DISTRICTS.size():
+		var sum := Vector2.ZERO
+		var n := 0
+		for b in block_district.keys():
+			if block_district[b] == dist:
+				sum += Vector2(b.x * 8 + 4.5, b.y * 8 + 4.5)
+				n += 1
+		district_centers.append(sum / maxf(1.0, n) if n > 0 else LOT.get_center())
+
+
+## Ângulo a partir do "norte" da tela, para o Centro ficar perto da entrada.
+func _block_angle(b: Vector2i) -> float:
+	var a := atan2(b.y - 2.5, b.x - 2.5)
+	return fposmod(a + PI * 0.75 + PI / 3.0, TAU)
+
+
+func _dev(dist: int) -> float:
+	var dev := float(Game.lvl.city) / 16.0 + Game.phase_index() * 0.15
+	if dist == 0:
+		dev += 0.15
+	elif dist >= 3:
+		dev -= 0.1
+	return dev
+
+
+# ---------------------------------------------------------------- Construção
+
+func _rebuild() -> void:
+	if spot_cars.size() != Game.spots():
+		spot_cars.resize(Game.spots())
+	var gkey := "%d|%d" % [Game.spots(), Game.districts_unlocked]
+	if gkey != _ground_key:
+		_ground_key = gkey
+		queue_redraw()
+		overlay.queue_redraw()
+	var key := "%d|%d|%d|%d|%d" % [int(Game.lvl.city), Game.districts_unlocked, Game.phase_index(), int(Game.lvl.attract), Game.spots() / 48]
+	if key == _city_key:
+		return
+	_city_key = key
+	for n in _static_nodes:
+		n.queue_free()
+	_static_nodes.clear()
+	var br := RandomNumberGenerator.new()
+	_build_city(br)
+	_build_lot_props()
+	_build_beach(br)
+	_build_walkers(br)
+	var tints := [Color(1, 1, 1), Color(1, 0.96, 0.9), Color(0.9, 0.8, 0.88)]
+	tint.color = tints[Game.phase_index()]
+
+
+func _prop(kind: String, x: float, y: float, w: float = 0.0, d: float = 0.0):
+	var p = PropScript.new()
+	p.setup(kind, x, y, w, d)
+	objects.add_child(p)
+	_static_nodes.append(p)
+	return p
+
+
+func _tree(x: float, y: float, r: RandomNumberGenerator, palm: bool) -> void:
+	var t = _prop("palm" if palm else "tree", x, y)
+	t.size_f = r.randf_range(-0.15, 0.25)
+	t.color = Color.from_hsv(r.randf_range(0.25, 0.36), r.randf_range(0.55, 0.75), r.randf_range(0.5, 0.72))
+	t.queue_redraw()
+
+
+func _build_city(br: RandomNumberGenerator) -> void:
+	var phase := Game.phase_index()
+	var lit: float = [0.04, 0.12, 0.5][phase]
+	for b in block_district.keys():
+		var dist: int = block_district[b]
+		var locked: bool = dist >= Game.districts_unlocked
+		var ox: float = b.x * 8 + 1.0
+		var oy: float = b.y * 8 + 1.0
+		br.seed = hash(b) + 17
+		# palmeiras na calçada
+		if not locked:
+			_tree(ox + 0.15, oy + 0.15, br, true)
+			_tree(ox + 6.85, oy + 6.85, br, true)
+		for pi in 4:
+			var px := ox + 0.4 + (pi % 2) * 3.3
+			var py := oy + 0.4 + (pi / 2) * 3.3
+			var r := br.randf()
+			var r2 := br.randf()
+			var r3 := br.randf()
+			if locked:
+				for k in int(r2 * 4.0):
+					_tree(px + br.randf() * 2.8, py + br.randf() * 2.8, br, false)
+				continue
+			if dist == 3 or dist == 6:
+				var wh = _prop("warehouse", px + 0.1, py + 0.1, 2.7, 2.6)
+				wh.floors = 1 + int(r * 2.0)
+				wh.color = Color("c9ccd2") if r2 < 0.5 else Color("d9c9a8")
+				continue
+			var s := _dev(dist) + r * 0.5 - 0.15
+			if r3 < 0.12:
+				for k in 3 + int(r2 * 3.0):
+					_tree(px + br.randf() * 2.8, py + br.randf() * 2.8, br, dist == 4)
+			elif s < 0.3:
+				var hw := br.randf_range(1.5, 2.1)
+				var hx := px + br.randf_range(0.0, 2.9 - hw)
+				var hy := py + br.randf_range(0.0, 2.9 - hw)
+				var h = _prop("house", hx, hy, hw, hw * br.randf_range(0.8, 1.0))
+				h.floors = 2 if r2 > 0.7 else 1
+				h.color = Color(BUILDING_COLORS[br.randi_range(0, BUILDING_COLORS.size() - 1)])
+				h.color2 = Color(ROOF_COLORS[br.randi_range(0, ROOF_COLORS.size() - 1)])
+				h.seed_value = br.randi()
+				h.lit_chance = lit
+				if hx - px > 0.8:
+					_tree(px + 0.4, py + 2.5, br, dist == 4)
+				else:
+					_tree(px + 2.6, py + 0.4, br, dist == 4)
+			else:
+				var tower := s >= 1.0 and phase >= 2
+				var floors := 0
+				if s < 0.65:
+					floors = 2 + int((s - 0.3) * 14.0)
+				elif not tower:
+					floors = mini(6 + int((s - 0.65) * 16.0), 12)
+				else:
+					floors = mini(12 + int((s - 1.0) * 30.0), 34)
+				var bw := 2.4 if tower else 2.7
+				var bld = _prop("tower" if tower else "building", px + (2.9 - bw) / 2.0, py + (2.9 - bw) / 2.0, bw, bw)
+				bld.floors = maxi(2, floors)
+				var pal: Array = TOWER_COLORS if tower else BUILDING_COLORS
+				bld.color = Color(pal[br.randi_range(0, pal.size() - 1)])
+				bld.seed_value = br.randi()
+				bld.lit_chance = lit
+
+
+func _build_lot_props() -> void:
+	var a := int(Game.lvl.attract)
+	var units := ceili(float(Game.spots()) / (SPOTS_PER_ROW * 2))
+	var booth = _prop("booth", ENTRY_X - 1.0, LOT.position.y + 0.05, 0.5, 0.4)
+	booth.queue_redraw()
+	if a >= 3:
+		var k = _prop("kiosk", LOT.position.x + 0.05, LOT.position.y + 0.05, 0.9, 0.85)
+		k.color = Color("f2efe6")
+		k.color2 = Color("e23b3b")
+	var lamps: Array = []
+	for i in 6:
+		lamps.append(Vector2(19.0 + i * 2.4, LOT.position.y + 0.1))
+	for u in units:
+		lamps.append(Vector2(LOT.position.x + 0.1, 19.5 + 3.0 * u))
+		lamps.append(Vector2(LOT.end.x - 0.1, 19.5 + 3.0 * u))
+	var lit := 1.0 if Game.phase_index() >= 1 else 0.0
+	for i in mini(lamps.size(), a * 3):
+		var l = _prop("lamp", lamps[i].x, lamps[i].y)
+		l.lit_chance = lit
+	var canopies := 0
+	if a >= 4:
+		canopies = 1
+	if a >= 8:
+		canopies = 2
+	if a >= 12:
+		canopies = units * 2
+	for c in mini(canopies, units * 2):
+		var u := c / 2
+		var y := 18.0 + 3.0 * u + (2.0 if c % 2 == 1 else 0.0)
+		_prop("canopy", 19.0, y, 12.0, 1.0)
+
+
+func _build_beach(br: RandomNumberGenerator) -> void:
+	br.seed = 99
+	for i in 40:
+		var t := br.randf() * MAP
+		var side := br.randi_range(0, 3)
+		var off := br.randf_range(-1.3, -0.5)
+		var pos := Vector2(t, off)
+		match side:
+			1: pos = Vector2(off, t)
+			2: pos = Vector2(t, MAP - off)
+			3: pos = Vector2(MAP - off, t)
+		if br.randf() < 0.65:
+			_tree(pos.x, pos.y, br, true)
+		else:
+			var u = _prop("umbrella", pos.x, pos.y)
+			u.color = Color.from_hsv(br.randf(), 0.75, 0.95)
+
+
+func _build_walkers(br: RandomNumberGenerator) -> void:
+	br.seed = 4242 + Game.districts_unlocked
+	var count := 12 + 14 * Game.phase_index() + Game.districts_unlocked * 2
+	var blocks: Array = []
+	for b in block_district.keys():
+		if block_district[b] < Game.districts_unlocked:
+			blocks.append(b)
+	if blocks.is_empty():
+		return
+	for i in count:
+		var b: Vector2i = blocks[br.randi_range(0, blocks.size() - 1)]
+		var ox: float = b.x * 8 + 1.0
+		var oy: float = b.y * 8 + 1.0
+		var p0: Vector2
+		var p1: Vector2
+		match br.randi_range(0, 3):
+			0:
+				p0 = Vector2(ox + 0.2, oy + 0.15)
+				p1 = Vector2(ox + 6.8, oy + 0.15)
+			1:
+				p0 = Vector2(ox + 0.2, oy + 6.85)
+				p1 = Vector2(ox + 6.8, oy + 6.85)
+			2:
+				p0 = Vector2(ox + 0.15, oy + 0.2)
+				p1 = Vector2(ox + 0.15, oy + 6.8)
+			_:
+				p0 = Vector2(ox + 6.85, oy + 0.2)
+				p1 = Vector2(ox + 6.85, oy + 6.8)
+		var wk = WalkerScript.new()
+		wk.setup(br, p0, p1)
+		objects.add_child(wk)
+		_static_nodes.append(wk)
+
+
+# ---------------------------------------------------------------- Vagas
+
+func spot_center(i: int) -> Vector2:
+	var u := i / (SPOTS_PER_ROW * 2)
+	var k := i % (SPOTS_PER_ROW * 2)
+	var row := k / SPOTS_PER_ROW
+	var c := k % SPOTS_PER_ROW
+	return Vector2(19.25 + 0.5 * c, 18.5 + 3.0 * u + (2.0 if row == 1 else 0.0))
+
+
+func spot_aisle(i: int) -> float:
+	return 19.5 + 3.0 * (i / (SPOTS_PER_ROW * 2))
 
 
 # ---------------------------------------------------------------- Simulação
 
 func _process(delta: float) -> void:
-	_time += delta
-	# Carros que entram no estacionamento
 	arrival_acc = minf(arrival_acc + Game.arrivals_per_sec() * delta, 4.0)
 	while arrival_acc >= 1.0:
 		arrival_acc -= 1.0
@@ -105,23 +371,17 @@ func _process(delta: float) -> void:
 			Game.lost_customers += 1
 		else:
 			_spawn_arrival(idx)
-	# Trânsito decorativo (carros que só passam)
-	var passing := minf(Game.passing_per_sec() * (1.0 - Game.enter_chance()), 1.6)
-	traffic_acc += passing * delta
-	while traffic_acc >= 1.0:
-		traffic_acc -= 1.0
+	_traffic_timer += delta
+	var target := clampi(int(Game.passing_per_sec() * 5.0), 6, 45)
+	if _traffic_timer >= 0.35 and traffic_count < target:
+		_traffic_timer = 0.0
 		_spawn_traffic()
-	Game.occupied = _count_occupied()
-	if fmod(_time, 1.0) < delta:
-		queue_redraw()  # piscar das luzes/sinais
-
-
-func _count_occupied() -> int:
+	_fx_budget = minf(_fx_budget + delta * 4.0, 4.0)
 	var n := 0
 	for c in spot_cars:
 		if c != null:
 			n += 1
-	return n
+	Game.occupied = n
 
 
 func _free_spot() -> int:
@@ -131,61 +391,145 @@ func _free_spot() -> int:
 			free.append(i)
 	if free.is_empty():
 		return -1
-	return free[rng.randi_range(0, free.size() - 1)]
+	# preenche primeiro as vagas da frente (mais perto da entrada)
+	free.sort()
+	return free[rng.randi_range(0, mini(free.size() - 1, 5))]
 
 
-func _new_car():
+func _new_car(start: Vector2):
 	var car = CarScript.new()
-	cars_layer.add_child(car)
-	car.randomize_color(rng)
+	objects.add_child(car)
+	car.setup(rng, start)
+	car.modulate.a = 0.0
+	car.create_tween().tween_property(car, "modulate:a", 1.0, 0.4)
 	return car
 
 
-func _spawn_traffic() -> void:
-	var car = _new_car()
-	var w := get_viewport_rect().size.x
-	var points := PackedVector2Array()
+func _despawn(car) -> void:
+	var tw = car.create_tween()
+	tw.tween_property(car, "modulate:a", 0.0, 0.4)
+	tw.tween_callback(car.queue_free)
+
+
+func _right(d: Vector2) -> Vector2:
+	var n := d.normalized()
+	return Vector2(-n.y, n.x) * LANE
+
+
+## Desloca a rota para a faixa da direita da rua.
+func _lane(pts: Array) -> Array:
+	var clean: Array = []
+	for p in pts:
+		if clean.is_empty() or (clean[-1] as Vector2).distance_to(p) > 0.01:
+			clean.append(p)
+	if clean.size() < 2:
+		return clean
+	var out: Array = []
+	for i in clean.size():
+		var off := Vector2.ZERO
+		if i == 0:
+			off = _right(clean[1] - clean[0])
+		elif i == clean.size() - 1:
+			off = _right(clean[i] - clean[i - 1])
+		else:
+			var d1: Vector2 = (clean[i] - clean[i - 1]).normalized()
+			var d2: Vector2 = (clean[i + 1] - clean[i]).normalized()
+			off = _right(d1) if absf(d1.dot(d2)) > 0.9 else _right(d1) + _right(d2)
+		out.append(clean[i] + off)
+	return out
+
+
+func _crosses_lot(a: Vector2, b: Vector2) -> bool:
+	if is_equal_approx(a.x, b.x):
+		return a.x > LOT.position.x and a.x < LOT.end.x and maxf(a.y, b.y) > LOT.position.y and minf(a.y, b.y) < LOT.end.y
+	return a.y > LOT.position.y and a.y < LOT.end.y and maxf(a.x, b.x) > LOT.position.x and minf(a.x, b.x) < LOT.end.x
+
+
+func _rand_road() -> float:
+	return ROADS[rng.randi_range(0, ROADS.size() - 1)]
+
+
+func _random_route() -> Array:
+	var e := MAP - 0.5
+	var pts: Array = []
 	if rng.randf() < 0.5:
-		car.position = Vector2(-OFFSCREEN, LANE_RIGHT_Y)
-		points.append(Vector2(w + OFFSCREEN, LANE_RIGHT_Y))
+		var r1 := _rand_road()
+		var ry := _rand_road()
+		var r2 := _rand_road()
+		pts = [Vector2(r1, 0.5), Vector2(r1, ry), Vector2(r2, ry), Vector2(r2, e)]
 	else:
-		car.position = Vector2(w + OFFSCREEN, LANE_LEFT_Y)
-		points.append(Vector2(-OFFSCREEN, LANE_LEFT_Y))
-	car.rotation = (points[0] - car.position).angle() + PI / 2.0
-	car.arrived.connect(car.queue_free)
-	car.go(points, rng.randf_range(200.0, 300.0))
+		var ry1 := _rand_road()
+		var rx := _rand_road()
+		var ry2 := _rand_road()
+		pts = [Vector2(0.5, ry1), Vector2(rx, ry1), Vector2(rx, ry2), Vector2(e, ry2)]
+	if rng.randf() < 0.5:
+		pts.reverse()
+	for i in pts.size() - 1:
+		if _crosses_lot(pts[i], pts[i + 1]):
+			return []
+	return pts
+
+
+func _spawn_traffic() -> void:
+	var pts: Array = []
+	for attempt in 8:
+		pts = _random_route()
+		if not pts.is_empty():
+			break
+	if pts.is_empty():
+		pts = [Vector2(0.5, 0.5), Vector2(MAP - 0.5, 0.5)]
+	var route := _lane(pts)
+	var car = _new_car(route[0])
+	traffic_count += 1
+	car.arrived.connect(_traffic_done.bind(car), CONNECT_ONE_SHOT)
+	car.go(route.slice(1), ROAD_SPEED * rng.randf_range(0.85, 1.15))
+
+
+func _traffic_done(car) -> void:
+	traffic_count -= 1
+	_despawn(car)
+
+
+func _arrival_road() -> Array:
+	match rng.randi_range(0, 3):
+		0:
+			return _lane([Vector2(0.5, 16.5), Vector2(ENTRY_X, 16.5)])
+		1:
+			return _lane([Vector2(MAP - 0.5, 16.5), Vector2(ENTRY_X, 16.5)])
+	var r := _rand_road()
+	return _lane([Vector2(r, 0.5), Vector2(r, 16.5), Vector2(ENTRY_X, 16.5)])
+
+
+func _exit_road() -> Array:
+	match rng.randi_range(0, 3):
+		0:
+			return _lane([Vector2(EXIT_X, 16.5), Vector2(0.5, 16.5)])
+		1:
+			return _lane([Vector2(EXIT_X, 16.5), Vector2(MAP - 0.5, 16.5)])
+	var r := _rand_road()
+	return _lane([Vector2(EXIT_X, 16.5), Vector2(r, 16.5), Vector2(r, 0.5)])
 
 
 func _spawn_arrival(idx: int) -> void:
-	var car = _new_car()
+	var road := _arrival_road()
+	var car = _new_car(road[0])
 	car.spot_index = idx
 	spot_cars[idx] = car
-	car.set_car_size(_car_size())
-	var w := get_viewport_rect().size.x
-	car.position = Vector2(w + OFFSCREEN, LANE_LEFT_Y)
-	car.rotation = -PI / 2.0
-	var p := spot_pos[idx]
-	var ay := aisle_y[idx]
-	var first_aisle := aisle_y[0]
-	var points := PackedVector2Array([
-		Vector2(ENTRY_X, LANE_LEFT_Y),
-		Vector2(ENTRY_X, first_aisle),
-	])
-	if not is_equal_approx(ay, first_aisle):
-		points.append(Vector2(LEFT_LANE_X, first_aisle))
-		points.append(Vector2(LEFT_LANE_X, ay))
-	points.append(Vector2(p.x, ay))
-	points.append(p)
+	var c := spot_center(idx)
+	var aisle := spot_aisle(idx)
+	var pts: Array = road.slice(1)
+	pts.append_array([
+		Vector2(ENTRY_X, TOP_AISLE_Y), Vector2(LEFT_LANE_X, TOP_AISLE_Y),
+		Vector2(LEFT_LANE_X, aisle), Vector2(c.x, aisle), c])
 	car.arrived.connect(_on_car_parked.bind(car), CONNECT_ONE_SHOT)
-	car.go(points, 260.0)
+	car.go(pts, ROAD_SPEED)
 
 
 func _on_car_parked(car) -> void:
 	var idx: int = car.spot_index
-	if idx >= spot_pos.size():
+	if idx < 0 or idx >= spot_cars.size() or spot_cars[idx] != car:
+		_despawn(car)
 		return
-	car.position = spot_pos[idx]
-	car.rotation = PI
 	Game.car_parked()
 	var stay := rng.randf_range(STAY_SECONDS - 4.0, STAY_SECONDS + 4.0)
 	get_tree().create_timer(stay).timeout.connect(_car_leave.bind(car))
@@ -195,187 +539,165 @@ func _car_leave(car) -> void:
 	if not is_instance_valid(car):
 		return
 	var idx: int = car.spot_index
-	var hours := rng.randi_range(1, 3)
-	var paid := Game.car_paid(Game.price() * hours)
-	_floating_text("+" + Game.money_str(paid), car.position + Vector2(0, -20))
-	var w := get_viewport_rect().size.x
-	var ay := aisle_y[mini(idx, aisle_y.size() - 1)]
-	var first_aisle := aisle_y[0]
-	var points := PackedVector2Array([Vector2(car.position.x, ay)])
-	if not is_equal_approx(ay, first_aisle):
-		points.append(Vector2(RIGHT_LANE_X, ay))
-		points.append(Vector2(RIGHT_LANE_X, first_aisle))
-	points.append(Vector2(EXIT_X, first_aisle))
-	points.append(Vector2(EXIT_X, LANE_RIGHT_Y))
-	points.append(Vector2(w + OFFSCREEN, LANE_RIGHT_Y))
-	if idx < spot_cars.size() and spot_cars[idx] == car:
+	var paid := Game.car_paid(Game.price() * rng.randi_range(1, 3))
+	_floating_text("+" + Game.money_str(paid), Iso.pg(car.grid, 26.0))
+	var aisle := spot_aisle(idx)
+	var pts: Array = [
+		Vector2(car.grid.x, aisle), Vector2(RIGHT_LANE_X, aisle),
+		Vector2(RIGHT_LANE_X, TOP_AISLE_Y), Vector2(EXIT_X, TOP_AISLE_Y)]
+	pts.append_array(_exit_road())
+	if idx >= 0 and idx < spot_cars.size() and spot_cars[idx] == car:
 		spot_cars[idx] = null
 	car.spot_index = -1
-	car.arrived.connect(car.queue_free, CONNECT_ONE_SHOT)
-	car.go(points, 260.0)
+	car.arrived.connect(_despawn.bind(car), CONNECT_ONE_SHOT)
+	car.go(pts, LOT_SPEED)
 
 
 func _floating_text(text: String, pos: Vector2) -> void:
+	if _fx_budget < 1.0 or camera.zoom.x < 0.45:
+		return
+	_fx_budget -= 1.0
 	var label := Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size", 22)
+	label.add_theme_font_size_override("font_size", 18)
 	label.add_theme_color_override("font_color", Color("7dff7a"))
-	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-	label.add_theme_constant_override("outline_size", 6)
-	label.position = pos - Vector2(40, 10)
-	fx_layer.add_child(label)
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	label.add_theme_constant_override("outline_size", 5)
+	label.position = pos - Vector2(30, 10)
+	fx.add_child(label)
 	var tw := label.create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(label, "position:y", pos.y - 70.0, 1.2)
-	tw.tween_property(label, "modulate:a", 0.0, 1.2).set_delay(0.4)
+	tw.tween_property(label, "position:y", pos.y - 50.0, 1.2)
+	tw.tween_property(label, "modulate:a", 0.0, 0.8).set_delay(0.4)
 	tw.chain().tween_callback(label.queue_free)
 
 
-# ---------------------------------------------------------------- Cidade
-
-func _rebuild_city() -> void:
-	var key := "%d-%d-%d" % [int(Game.lvl.city), Game.districts_unlocked, Game.phase_index()]
-	if key == _city_key:
-		return
-	_city_key = key
-	var r := RandomNumberGenerator.new()
-	r.seed = 2026
-	_buildings.clear()
-	var phase := Game.phase_index()
-	var growth := clampf(float(Game.lvl.city) / 20.0 + Game.districts_unlocked * 0.05, 0.0, 1.0)
-	var x := -40.0
-	while x < 1400.0:
-		var kind := 0  # 0 casa, 1 prédio, 2 arranha-céu
-		var roll := r.randf()
-		if phase >= 2 and roll < 0.25 + growth * 0.3:
-			kind = 2
-		elif phase >= 1 and roll < 0.55 + growth * 0.2:
-			kind = 1
-		elif phase == 0 and roll < growth * 1.5:
-			kind = 1
-		var bw := 0.0
-		var bh := 0.0
-		match kind:
-			0:
-				bw = r.randf_range(50, 70)
-				bh = r.randf_range(40, 60)
-			1:
-				bw = r.randf_range(55, 85)
-				bh = r.randf_range(90, 160) * (0.8 + growth * 0.4)
-			2:
-				bw = r.randf_range(50, 75)
-				bh = r.randf_range(180, 300) * (0.8 + growth * 0.4)
-		var col := Color.from_hsv(r.randf_range(0.0, 1.0), r.randf_range(0.1, 0.3), r.randf_range(0.65, 0.9))
-		if kind == 2:
-			col = Color.from_hsv(r.randf_range(0.55, 0.65), 0.35, r.randf_range(0.45, 0.7))
-		_buildings.append({"x": x, "w": bw, "h": bh, "kind": kind, "color": col, "seed": r.randi()})
-		x += bw + r.randf_range(4, 18)
-	_trees.clear()
-	for i in 14:
-		_trees.append(Vector2(r.randf_range(0, 1400), r.randf_range(372, 400)))
-	queue_redraw()
-
+# ---------------------------------------------------------------- Chão
 
 func _draw() -> void:
-	var vw := get_viewport_rect().size.x
-	var night := Game.phase_index() >= 2
-	# céu e grama
-	var sky_top := Color("4f8fd8") if not night else Color("1b2350")
-	var sky_bottom := Color("a9d4f5") if not night else Color("e08a5a")
-	for i in 20:
-		var t := i / 20.0
-		draw_rect(Rect2(-400, -400 + t * 805.0, vw + 800, 41), sky_top.lerp(sky_bottom, t))
-	draw_rect(Rect2(-400, 360, vw + 800, 2000), Color("5c9a45"))
-	# montanha
-	draw_colored_polygon(PackedVector2Array([Vector2(-100, 400), Vector2(180, 250), Vector2(420, 400)]), Color("6d8c6a"))
-	draw_colored_polygon(PackedVector2Array([Vector2(250, 400), Vector2(560, 230), Vector2(900, 400)]), Color("5e7d5b"))
-	# prédios
-	for b in _buildings:
-		_draw_building(b, night)
-	for t in _trees:
-		_draw_tree(t, 16.0)
-	# calçadas e rua
-	draw_rect(Rect2(-400, ROAD_TOP - 12, vw + 800, 12), Color("bdb7aa"))
-	draw_rect(Rect2(-400, ROAD_TOP, vw + 800, ROAD_BOTTOM - ROAD_TOP), Color("3b3d42"))
-	draw_rect(Rect2(-400, ROAD_BOTTOM, vw + 800, 14), Color("bdb7aa"))
-	var dash := -400.0
-	while dash < vw + 400:
-		draw_rect(Rect2(dash, (ROAD_TOP + ROAD_BOTTOM) / 2.0 - 2, 30, 4), Color("f2d24b"))
-		dash += 60.0
-	# estacionamento
-	draw_rect(LOT.grow(8), Color("2a2c30"))
-	draw_rect(LOT, Color("4a4d54"))
-	draw_rect(Rect2(LOT.position.x, LOT.position.y, LOT.size.x, 4), Color("2a2c30"))
-	# entrada/saída
-	draw_rect(Rect2(EXIT_X - 34, ROAD_BOTTOM, 164, LOT.position.y - ROAD_BOTTOM + 4), Color("4a4d54"))
-	_draw_arrow(Vector2(ENTRY_X, LOT.position.y + 4), true)
-	_draw_arrow(Vector2(EXIT_X, LOT.position.y + 4), false)
-	# cancela
-	var blink := int(_time * 2.0) % 2 == 0
-	draw_rect(Rect2(ENTRY_X + 30, ROAD_BOTTOM + 2, 22, 22), Color("f2c230"))
-	draw_circle(Vector2(ENTRY_X + 41, ROAD_BOTTOM + 13), 4, Color("3aff6a") if blink else Color("1a6a2a"))
-	# vagas
-	var line_col := Color(1, 1, 1, 0.85)
-	for i in spot_pos.size():
-		var p := spot_pos[i]
-		var r := Rect2(p - spot_size / 2.0, spot_size)
-		draw_line(r.position, r.position + Vector2(0, r.size.y), line_col, 2.0)
-		draw_line(r.position + Vector2(r.size.x, 0), r.end, line_col, 2.0)
-		draw_line(r.position + Vector2(0, r.size.y), r.end, line_col, 2.0)
-	# faixas laterais de circulação
-	for y in range(int(LOT.position.y) + 30, int(LOT.end.y) - 10, 40):
-		draw_rect(Rect2(LEFT_LANE_X - 2, y, 4, 18), Color(1, 1, 1, 0.4))
-		draw_rect(Rect2(RIGHT_LANE_X - 2, y, 4, 18), Color(1, 1, 1, 0.4))
-	# árvores e postes ao redor
-	for y in range(int(LOT.position.y) + 40, int(LOT.end.y), 120):
-		_draw_tree(Vector2(14, y), 14.0)
-		_draw_tree(Vector2(vw - 14, y + 60), 14.0)
-	draw_rect(Rect2(-400, LOT.end.y + 8, vw + 800, 400), Color("5c9a45"))
-	# placa "P"
-	var sign_pos := Vector2(570, ROAD_BOTTOM + 2)
-	draw_rect(Rect2(sign_pos.x + 16, sign_pos.y - 4, 4, 26), Color("555555"))
-	draw_rect(Rect2(sign_pos, Vector2(36, 22)), Color("2f6fe0"))
-	draw_string(ThemeDB.fallback_font, sign_pos + Vector2(10, 19), "P", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
-
-
-func _draw_arrow(pos: Vector2, down: bool) -> void:
-	var d := 1.0 if down else -1.0
-	var c := Color(1, 1, 1, 0.8)
-	draw_rect(Rect2(pos.x - 3, pos.y + 4, 6, 18), c)
-	var tip := pos + Vector2(0, 22 + 10 * d) if down else pos + Vector2(0, 4 + 10 * d)
-	var base_y := pos.y + (22.0 if down else 4.0)
-	draw_colored_polygon(PackedVector2Array([Vector2(pos.x - 9, base_y), Vector2(pos.x + 9, base_y), tip]), c)
-
-
-func _draw_tree(p: Vector2, r: float) -> void:
-	draw_circle(p + Vector2(2, 3), r, Color(0, 0, 0, 0.2))
-	draw_circle(p, r, Color("2f7a33"))
-	draw_circle(p + Vector2(-r * 0.3, -r * 0.3), r * 0.55, Color("3f9443"))
-
-
-func _draw_building(b: Dictionary, night: bool) -> void:
-	var base_y := ROAD_TOP - 14.0
-	var x: float = b.x
-	var w: float = b.w
-	var h: float = b.h
-	var col: Color = b.color
-	var r := Rect2(x, base_y - h, w, h)
-	draw_rect(r, col.darkened(0.25) if night else col)
-	draw_rect(Rect2(x + w * 0.82, base_y - h, w * 0.18, h), col.darkened(0.4))
-	var kind: int = b.kind
-	if kind == 0:
-		draw_colored_polygon(PackedVector2Array([Vector2(x - 4, base_y - h), Vector2(x + w + 4, base_y - h), Vector2(x + w / 2.0, base_y - h - 22)]), Color("b0503a"))
-		draw_rect(Rect2(x + w * 0.4, base_y - 22, 12, 22), Color("6b4429"))
-		return
+	var o := Vector2.ZERO
+	# mar com ondinhas
+	Iso.quad(self, o, -70, -70, MAP + 140, MAP + 140, 0, Color("1e9fb4"))
 	var wr := RandomNumberGenerator.new()
-	wr.seed = int(b.seed)
-	var lit := Color("ffd76a")
-	var dark := Color(0.2, 0.28, 0.38)
-	var yy := base_y - h + 10.0
-	while yy < base_y - 16.0:
-		var xx := x + 6.0
-		while xx < x + w * 0.78 - 8.0:
-			var on := wr.randf() < (0.6 if night else 0.1)
-			draw_rect(Rect2(xx, yy, 7, 9), lit if on else dark)
-			xx += 13.0
-		yy += 16.0
+	wr.seed = 7
+	for i in 500:
+		var x := wr.randf_range(-40, MAP + 40)
+		var y := wr.randf_range(-40, MAP + 40)
+		if x > -3 and x < MAP + 3 and y > -3 and y < MAP + 3:
+			continue
+		Iso.quad(self, o, x, y, 0.7, 0.1, 0, Color(1, 1, 1, 0.22))
+	# areia e grama
+	Iso.quad(self, o, -2.2, -2.2, MAP + 4.4, MAP + 4.4, 0, Color("ecd79c"))
+	Iso.quad(self, o, -2.2, -2.2, MAP + 4.4, 0.25, 0, Color("f7ead0"))
+	Iso.quad(self, o, -2.2, -2.2, 0.25, MAP + 4.4, 0, Color("f7ead0"))
+	Iso.quad(self, o, -0.3, -0.3, MAP + 0.6, MAP + 0.6, 0, Color("4fae4a"))
+	for x in int(MAP):
+		for y in int(MAP):
+			if (x + y) % 2 == 0:
+				Iso.quad(self, o, x, y, 1, 1, 0, Color("55b54f"))
+	# quarteirões
+	for b in block_district.keys():
+		var dist: int = block_district[b]
+		var locked: bool = dist >= Game.districts_unlocked
+		var ox: float = b.x * 8 + 1.0
+		var oy: float = b.y * 8 + 1.0
+		Iso.quad(self, o, ox, oy, 7, 7, 0, Color("d4cdbd"))
+		var inner := Color("5fb85a")
+		if locked:
+			inner = Color("7a9a55")
+		elif dist == 3 or dist == 6:
+			inner = Color("a8a69c")
+		Iso.quad(self, o, ox + 0.3, oy + 0.3, 6.4, 6.4, 0, inner)
+		if not locked and dist != 3 and dist != 6:
+			Iso.quad(self, o, ox + 3.25, oy + 0.3, 0.5, 6.4, 0, Color("d4cdbd"))
+			Iso.quad(self, o, ox + 0.3, oy + 3.25, 6.4, 0.5, 0, Color("d4cdbd"))
+	# ruas
+	var road := Color("4a4d55")
+	for c in ROADS:
+		var k: float = c - 0.5
+		Iso.quad(self, o, 0, k, MAP, 1, 0, road)
+		Iso.quad(self, o, k, 0, 1, MAP, 0, road)
+	for c in ROADS:
+		var k: float = c - 0.5
+		for t in int(MAP):
+			if t % 8 == 0:
+				continue
+			Iso.quad(self, o, t + 0.25, k + 0.47, 0.45, 0.06, 0, Color(1, 1, 1, 0.75))
+			Iso.quad(self, o, k + 0.47, t + 0.25, 0.06, 0.45, 0, Color(1, 1, 1, 0.75))
+	# faixas de pedestre
+	for cx in ROADS:
+		for cy in ROADS:
+			var kx: float = cx - 0.5
+			var ky: float = cy - 0.5
+			for s in 5:
+				var q := 0.1 + s * 0.17
+				if kx + 1.4 < MAP:
+					Iso.quad(self, o, kx + 1.05, ky + q, 0.35, 0.09, 0, Color("f2f2f2"))
+				if ky + 1.4 < MAP:
+					Iso.quad(self, o, kx + q, ky + 1.05, 0.09, 0.35, 0, Color("f2f2f2"))
+	_draw_lot(o)
+
+
+func _draw_lot(o: Vector2) -> void:
+	var units := ceili(float(Game.spots()) / (SPOTS_PER_ROW * 2))
+	var pave_end := minf(LOT.end.y - 0.1, 21.4 + 3.0 * (units - 1))
+	Iso.quad(self, o, LOT.position.x, LOT.position.y, LOT.size.x, LOT.size.y, 0, Color("5fb85a"))
+	if pave_end < LOT.end.y - 0.3:
+		# área de expansão (terra)
+		Iso.quad(self, o, LOT.position.x + 0.3, pave_end + 0.2, LOT.size.x - 0.6, LOT.end.y - pave_end - 0.5, 0, Color("b99a68"))
+		for i in 12:
+			Iso.quad(self, o, LOT.position.x + 0.6 + i * 1.2, pave_end + 0.5, 0.5, 0.12, 0, Color("f2a33a"))
+	Iso.quad(self, o, LOT.position.x, LOT.position.y, LOT.size.x, pave_end - LOT.position.y, 0, Color("2f3238"))
+	Iso.quad(self, o, LOT.position.x + 0.08, LOT.position.y, LOT.size.x - 0.16, pave_end - LOT.position.y - 0.08, 0, Color("43464e"))
+	var yellow := Color("f2d23a")
+	for i in Game.spots():
+		var c := spot_center(i)
+		var x0 := c.x - 0.25
+		var y0 := c.y - 0.5
+		Iso.quad(self, o, x0 - 0.02, y0, 0.04, 1.0, 0, yellow)
+		Iso.quad(self, o, x0 + 0.48, y0, 0.04, 1.0, 0, yellow)
+		var back_y := y0 if (i % (SPOTS_PER_ROW * 2)) < SPOTS_PER_ROW else y0 + 0.96
+		Iso.quad(self, o, x0 - 0.02, back_y, 0.54, 0.04, 0, yellow)
+	# setas de entrada e saída
+	_arrow(o, ENTRY_X, 17.3, 1.0)
+	_arrow(o, EXIT_X, 17.3, -1.0)
+
+
+func _arrow(o: Vector2, x: float, y: float, dirv: float) -> void:
+	var white := Color(1, 1, 1, 0.85)
+	Iso.quad(self, o, x - 0.04, y - 0.25, 0.08, 0.5, 0, white)
+	var tip := y + 0.4 * dirv
+	var base := y + 0.15 * dirv
+	draw_colored_polygon(PackedVector2Array([Iso.p(x - 0.15, base), Iso.p(x + 0.15, base), Iso.p(x, tip)]), white)
+
+
+# ---------------------------------------------------------------- Bairros bloqueados (por cima)
+
+func _draw_overlay() -> void:
+	var font := ThemeDB.fallback_font
+	var next := Game.districts_unlocked
+	for b in block_district.keys():
+		var dist: int = block_district[b]
+		if dist < next:
+			continue
+		var ox: float = b.x * 8 + 1.0
+		var oy: float = b.y * 8 + 1.0
+		overlay.draw_colored_polygon(PackedVector2Array([Iso.p(ox, oy), Iso.p(ox + 7, oy), Iso.p(ox + 7, oy + 7), Iso.p(ox, oy + 7)]), Color(0.05, 0.1, 0.15, 0.35))
+		if dist == next:
+			var pts := PackedVector2Array([Iso.p(ox, oy), Iso.p(ox + 7, oy), Iso.p(ox + 7, oy + 7), Iso.p(ox, oy + 7), Iso.p(ox, oy)])
+			overlay.draw_polyline(pts, Color("3ff0ff"), 4.0)
+	for dist in range(next, Game.DISTRICTS.size()):
+		var c := Iso.pg(district_centers[dist])
+		var d: Dictionary = Game.DISTRICTS[dist]
+		var body := Rect2(c + Vector2(-16, -30), Vector2(32, 26))
+		overlay.draw_arc(c + Vector2(0, -30), 11.0, PI, TAU, 16, Color("c9ced6"), 5.0)
+		overlay.draw_rect(body, Color("8a919c"))
+		overlay.draw_rect(body.grow(-3), Color("b8bec8"))
+		overlay.draw_circle(c + Vector2(0, -19), 3.5, Color("4a4f58"))
+		var title: String = d.name
+		var price := Game.money_str(float(d.cost))
+		var col := Color("3ff0ff") if dist == next else Color.WHITE
+		overlay.draw_string_outline(font, c + Vector2(-150, 20), title, HORIZONTAL_ALIGNMENT_CENTER, 300, 26, 6, Color(0, 0, 0, 0.85))
+		overlay.draw_string(font, c + Vector2(-150, 20), title, HORIZONTAL_ALIGNMENT_CENTER, 300, 26, col)
+		overlay.draw_string_outline(font, c + Vector2(-150, 46), price, HORIZONTAL_ALIGNMENT_CENTER, 300, 22, 6, Color(0, 0, 0, 0.85))
+		overlay.draw_string(font, c + Vector2(-150, 46), price, HORIZONTAL_ALIGNMENT_CENTER, 300, 22, Color("ffd23f"))

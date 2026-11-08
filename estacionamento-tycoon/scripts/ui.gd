@@ -10,6 +10,11 @@ const C_GEM := Color("d77cff")
 const C_MUTED := Color(0.75, 0.8, 0.9)
 
 var root: Control
+var world = null
+var top_bar: Control
+var status_card: Control
+var bottom_bar: Control
+var side_buttons: Control
 var level_label: Label
 var xp_bar: ProgressBar
 var money_label: Label
@@ -37,6 +42,7 @@ func _ready() -> void:
 	_build_top_bar()
 	_build_status_card()
 	_build_bottom_bar()
+	_build_side_buttons()
 	_build_window()
 	_build_toast()
 	Game.notify.connect(show_toast)
@@ -121,6 +127,7 @@ func _build_top_bar() -> void:
 	bar.offset_right = -10
 	bar.offset_top = 10
 	root.add_child(bar)
+	top_bar = bar
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	bar.add_child(row)
@@ -164,6 +171,7 @@ func _build_status_card() -> void:
 	card.offset_right = -10
 	card.offset_top = 110
 	root.add_child(card)
+	status_card = card
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 2)
 	card.add_child(v)
@@ -181,6 +189,7 @@ func _build_bottom_bar() -> void:
 	bar.offset_bottom = -12
 	bar.offset_top = -102
 	root.add_child(bar)
+	bottom_bar = bar
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	bar.add_child(row)
@@ -219,7 +228,7 @@ func _build_window() -> void:
 	window.offset_left = 10
 	window.offset_right = -10
 	window.offset_bottom = -112
-	window.offset_top = -780
+	window.offset_top = -660
 	window.visible = false
 	root.add_child(window)
 	var v := VBoxContainer.new()
@@ -242,6 +251,54 @@ func _build_window() -> void:
 	window_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	window_body.add_theme_constant_override("separation", 10)
 	scroll.add_child(window_body)
+
+
+## True se a posição (tela) está sobre algum elemento da interface.
+func blocks_point(pos: Vector2) -> bool:
+	for c in [top_bar, status_card, bottom_bar, side_buttons]:
+		if c != null and c.visible and c.get_global_rect().has_point(pos):
+			return true
+	return window.visible and window.get_global_rect().has_point(pos)
+
+
+func open_tab(tab: String) -> void:
+	current_tab = tab
+	_rebuild_window()
+	window.visible = true
+
+
+func _build_side_buttons() -> void:
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	box.offset_left = -96
+	box.offset_right = -12
+	box.offset_top = 200
+	box.add_theme_constant_override("separation", 10)
+	root.add_child(box)
+	side_buttons = box
+	var p := _button("P", _on_focus_lot, 34)
+	p.custom_minimum_size = Vector2(84, 76)
+	p.add_theme_stylebox_override("normal", _box(Color("1d4fb8"), 38, 8))
+	p.add_theme_stylebox_override("hover", _box(Color("2a62d6"), 38, 8))
+	p.add_theme_stylebox_override("pressed", _box(Color("163c8c"), 38, 8))
+	box.add_child(p)
+	var m := _button("Mapa", _on_show_map, 20)
+	m.custom_minimum_size = Vector2(84, 60)
+	m.add_theme_stylebox_override("normal", _box(Color("2a4a8a"), 18, 6))
+	m.add_theme_stylebox_override("hover", _box(Color("3560a8"), 18, 6))
+	box.add_child(m)
+
+
+func _on_focus_lot() -> void:
+	close_window()
+	if world:
+		world.focus_lot()
+
+
+func _on_show_map() -> void:
+	close_window()
+	if world:
+		world.show_map()
 
 
 func close_window() -> void:
@@ -272,6 +329,8 @@ func _rebuild_window() -> void:
 			_build_city()
 		"expansion":
 			window_title.text = "Expansão da Cidade"
+			if world:
+				world.focus_district(Game.districts_unlocked)
 			_build_expansion()
 		"missions":
 			window_title.text = "Missões"
