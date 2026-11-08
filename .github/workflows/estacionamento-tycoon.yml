@@ -10,6 +10,9 @@ on:
 env:
   GODOT_VERSION: "4.3"
 
+permissions:
+  contents: write
+
 jobs:
   testes:
     runs-on: ubuntu-latest
@@ -58,3 +61,14 @@ jobs:
         with:
           name: estacionamento-tycoon-apk
           path: build/android/estacionamento-tycoon.apk
+      - name: Publicar APK na release "estacionamento-tycoon-latest"
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: estacionamento-tycoon-latest
+          name: Estacionamento Tycoon (versão mais recente)
+          body: |
+            APK de teste gerado automaticamente a partir do commit ${{ github.sha }}.
+            Baixe o arquivo .apk abaixo no celular e instale (permita "fontes desconhecidas").
+          make_latest: true
+          files: build/android/estacionamento-tycoon.apk
