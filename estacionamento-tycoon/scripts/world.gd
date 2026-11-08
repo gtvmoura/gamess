@@ -1056,50 +1056,35 @@ func _traffic_done(car) -> void:
 	_despawn(car)
 
 
+## Trajetos curtos: os clientes surgem (e somem) a poucas quadras do estacionamento,
+## com fade, para a rua não lotar de carros que só estão "de passagem".
+const NEAR_MIN := 4.0
+const NEAR_MAX := 8.0
+
+
+func _near_x(x: float, side: float) -> float:
+	return clampf(x + side * rng.randf_range(NEAR_MIN, NEAR_MAX), 0.5, MAP - 0.5)
+
+
 func _arrival_road() -> Array:
-	match rng.randi_range(0, 3):
-		0:
-			return _lane([Vector2(0.5, 16.5), Vector2(ENTRY_X, 16.5)])
-		1:
-			return _lane([Vector2(MAP - 0.5, 16.5), Vector2(ENTRY_X, 16.5)])
-	var r := _rand_road()
-	return _lane([Vector2(r, 0.5), Vector2(r, 16.5), Vector2(ENTRY_X, 16.5)])
+	return _arrival_road_to(ENTRY_X)
 
 
 func _exit_road() -> Array:
-	match rng.randi_range(0, 3):
-		0:
-			return _lane([Vector2(EXIT_X, 16.5), Vector2(0.5, 16.5)])
-		1:
-			return _lane([Vector2(EXIT_X, 16.5), Vector2(MAP - 0.5, 16.5)])
-	var r := _rand_road()
-	return _lane([Vector2(EXIT_X, 16.5), Vector2(r, 16.5), Vector2(r, 0.5)])
+	return _exit_road_from([], EXIT_X)
 
 
 func _arrival_road_to(tx: float, tail: Array = []) -> Array:
-	var pts: Array = []
-	match rng.randi_range(0, 3):
-		0:
-			pts = [Vector2(0.5, 16.5), Vector2(tx, 16.5)]
-		1:
-			pts = [Vector2(MAP - 0.5, 16.5), Vector2(tx, 16.5)]
-		_:
-			var r := _rand_road()
-			pts = [Vector2(r, 0.5), Vector2(r, 16.5), Vector2(tx, 16.5)]
+	var side := -1.0 if rng.randf() < 0.5 else 1.0
+	var pts: Array = [Vector2(_near_x(tx, side), 16.5), Vector2(tx, 16.5)]
 	pts.append_array(tail)
 	return _lane(pts)
 
 
 func _exit_road_from(head: Array, sx: float) -> Array:
 	var pts: Array = head.duplicate()
-	match rng.randi_range(0, 3):
-		0:
-			pts.append_array([Vector2(sx, 16.5), Vector2(0.5, 16.5)])
-		1:
-			pts.append_array([Vector2(sx, 16.5), Vector2(MAP - 0.5, 16.5)])
-		_:
-			var r := _rand_road()
-			pts.append_array([Vector2(sx, 16.5), Vector2(r, 16.5), Vector2(r, 0.5)])
+	var side := -1.0 if rng.randf() < 0.5 else 1.0
+	pts.append_array([Vector2(sx, 16.5), Vector2(_near_x(sx, side), 16.5)])
 	return _lane(pts)
 
 
