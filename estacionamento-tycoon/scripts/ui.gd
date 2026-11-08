@@ -23,6 +23,8 @@ var gems_label: Label
 var boost_label: Label
 var status_label: Label
 var city_label: Label
+var clock_label: Label
+var moment_label: Label
 var missions_btn: Button
 var window: PanelContainer
 var window_title: Label
@@ -175,8 +177,16 @@ func _build_status_card() -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 2)
 	card.add_child(v)
-	status_label = _label("", 20)
-	city_label = _label("", 18, C_MUTED)
+	var top := HBoxContainer.new()
+	clock_label = _label("", 20, C_GOLD)
+	moment_label = _label("", 20, C_GREEN_TEXT)
+	moment_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	moment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	top.add_child(clock_label)
+	top.add_child(moment_label)
+	v.add_child(top)
+	status_label = _label("", 19)
+	city_label = _label("", 17, C_MUTED)
 	v.add_child(status_label)
 	v.add_child(city_label)
 
@@ -214,8 +224,10 @@ func _update_hud() -> void:
 	boost_label.text = ("2x  " + Game.time_str(Game.boost_seconds_left())) if Game.is_boosted() else ""
 	status_label.text = "Vagas: %d/%d   Preço: %s/h   Entrada: %d%%" % [
 		Game.occupied, Game.spots(), Game.price_str(Game.price()), int(round(Game.enter_chance() * 100.0))]
-	city_label.text = "%s  -  %s habitantes  -  %d bairro(s)" % [
-		Game.phase_name(), Game.int_str(Game.population()), Game.districts_unlocked]
+	clock_label.text = Game.clock_str()
+	moment_label.text = Game.moment_str()
+	city_label.text = "%s  |  %s moradores  |  %s trabalhando" % [
+		Game.phase_name(), Game.int_str(Game.population()), Game.int_str(Game.employed())]
 	var claim := Game.claimable_missions()
 	missions_btn.text = "Missões (%d)" % claim if claim > 0 else "Missões"
 
@@ -272,7 +284,7 @@ func _build_side_buttons() -> void:
 	box.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	box.offset_left = -96
 	box.offset_right = -12
-	box.offset_top = 200
+	box.offset_top = 236
 	box.add_theme_constant_override("separation", 10)
 	root.add_child(box)
 	side_buttons = box
@@ -415,17 +427,13 @@ func _build_city() -> void:
 		c.add_child(l)
 		phases.add_child(c)
 	window_body.add_child(phases)
-	var pop := Game.population()
-	_upgrade_row("city", Game.int_str(pop) + " hab.", Game.int_str(pop * 1.3) + " hab.")
+	_build_city_stats()
+	var hs := Game.housing()
+	_upgrade_row("city", "Moradia p/ " + Game.int_str(hs), Game.int_str(hs * 1.3))
+	var jb := Game.jobs()
+	_upgrade_row("jobs", Game.int_str(jb) + " empregos", Game.int_str(jb * 1.3))
 	var vpr := Game.vehicles_per_resident()
 	_upgrade_row("fleet", "%d carros/100 hab." % int(round(vpr * 100.0)), "%d carros/100 hab." % int(round((vpr + 0.05) * 100.0)))
-	var info := _label("", 18, C_MUTED)
-	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	window_body.add_child(info)
-	var refresh := func():
-		info.text = "Carros passando na rua: %.0f por minuto." % (Game.passing_per_sec() * 60.0)
-	refresh.call()
-	refreshers.append(refresh)
 
 	var boost := _card()
 	window_body.add_child(boost)
@@ -442,6 +450,64 @@ func _build_city() -> void:
 	refreshers.append(func(): bb.disabled = Game.gems < Game.BOOST_GEMS)
 
 
+func _stat_row(parent: VBoxContainer, title: String) -> Array:
+	var row := HBoxContainer.new()
+	var t := _label(title, 18, C_MUTED)
+	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var v := _label("", 18)
+	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(t)
+	row.add_child(v)
+	parent.add_child(row)
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, 10)
+	parent.add_child(bar)
+	return [v, bar]
+
+
+func _build_city_stats() -> void:
+	var card := _card()
+	window_body.add_child(card)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 4)
+	card.add_child(v)
+	var pop_row := _stat_row(v, "Moradores / moradia")
+	var job_row := _stat_row(v, "Empregos preenchidos")
+	var work_row := _stat_row(v, "Trabalhadores empregados")
+	var hint := _label("", 16, C_MUTED)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(hint)
+	var flow := _label("", 17, C_GREEN_TEXT)
+	flow.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(flow)
+	var refresh := func():
+		var pop := Game.population()
+		var hs := Game.housing()
+		pop_row[0].text = "%s / %s" % [Game.int_str(pop), Game.int_str(hs)]
+		pop_row[1].max_value = hs
+		pop_row[1].value = pop
+		var jb := Game.jobs()
+		job_row[0].text = "%s / %s" % [Game.int_str(Game.employed()), Game.int_str(jb)]
+		job_row[1].max_value = jb
+		job_row[1].value = Game.employed()
+		var wa := Game.working_age()
+		work_row[0].text = "%d%%  (desemprego %d%%)" % [int(round((1.0 - Game.unemployment()) * 100.0)), int(round(Game.unemployment() * 100.0))]
+		work_row[1].max_value = maxf(1.0, wa)
+		work_row[1].value = Game.employed()
+		var target := Game.target_population()
+		if target < hs * 0.98:
+			hint.text = "Faltam empregos: a cidade só cresce até %s moradores. Atraia empresas!" % Game.int_str(target)
+		elif pop < target * 0.98:
+			hint.text = "Novos moradores chegando..."
+		else:
+			hint.text = "Moradias lotadas: construa mais para a cidade crescer."
+		flow.text = "Agora (%s): %.0f trabalhadores/min e %.0f compradores/min passando de carro." % [
+			Game.moment_str(), Game.work_traffic() * 60.0, Game.shop_traffic() * 60.0]
+	refresh.call()
+	refreshers.append(refresh)
+
+
 func _build_expansion() -> void:
 	_hint("Desbloqueie novos bairros: mais habitantes e um novo estacionamento em cada um (renda extra).")
 	for i in Game.DISTRICTS.size():
@@ -454,7 +520,7 @@ func _build_expansion() -> void:
 		var text := VBoxContainer.new()
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		text.add_child(_label(d.name, 24))
-		var desc := _label("%s\n+%d%% habitantes, +%d%% receita" % [d.desc, int(d.pop * 100.0), int(d.income * 100.0)], 17, C_MUTED)
+		var desc := _label("%s\n+%d%% moradia, +%d%% empregos, +%d%% receita" % [d.desc, int(d.pop * 100.0), int(d.jobs * 100.0), int(d.income * 100.0)], 17, C_MUTED)
 		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		text.add_child(desc)
 		row.add_child(text)

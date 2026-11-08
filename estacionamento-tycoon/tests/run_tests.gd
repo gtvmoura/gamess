@@ -60,14 +60,48 @@ func _initialize() -> void:
 	check(g.population() > pop_before, "bairro aumenta a população")
 	check(g.district_income_mult() > 1.0, "bairro aumenta a receita")
 
+	# Moradores x empregos
+	g.lvl.city = 10
+	g.lvl.jobs = 0
+	check(g.target_population() < g.housing() * 0.9, "sem empregos a cidade não enche as moradias")
+	g.lvl.jobs = 12
+	check(is_equal_approx(g.target_population(), g.housing()), "com empregos a cidade enche as moradias")
+	var p0: float = g.population()
+	g._simulate(30.0)
+	check(g.population() > p0 and g.population() < g.target_population(), "moradores chegam aos poucos (%s)" % g.int_str(g.population()))
+	g.settle_population()
+	check(g.employed() <= g.jobs() and g.employed() <= g.working_age(), "empregados limitados por vagas e moradores")
+	var jobs_before: float = g.employed()
+	g.lvl.jobs = 4
+	check(g.employed() < jobs_before, "menos empresas = menos trabalhadores")
+
+	# Ciclo do dia
+	var mean := 0.0
+	for h in 24:
+		g.hour = float(h)
+		mean += g.commute_mult() / 24.0
+	check(absf(mean - 1.0) < 0.05, "curva de trânsito tem média ~1 (%.2f)" % mean)
+	g.hour = 8.0
+	var rush: float = g.work_traffic()
+	g.hour = 3.0
+	check(g.work_traffic() < rush * 0.1, "madrugada tem bem menos trabalhadores que a hora do rush")
+	check(g.moment_str() == "Madrugada tranquila", "texto da madrugada")
+	g.hour = 8.0
+	check(g.moment_str() == "Hora do rush!", "texto da hora do rush")
+	g._simulate(g.DAY_SECONDS)
+	check(g.day == 2, "o dia vira depois de DAY_SECONDS")
+
 	# Progressão até a Metrópole é possível
 	g.lvl.city = int(g.UPGRADES.city.max)
+	g.lvl.jobs = int(g.UPGRADES.jobs.max)
 	g.districts_unlocked = g.DISTRICTS.size()
+	g.settle_population()
 	check(g.phase_name() == "Metrópole", "dá para virar Metrópole (pop %s)" % g.int_str(g.population()))
 
 	# Vagas limitam a receita
 	g.lvl.fleet = int(g.UPGRADES.fleet.max)
-	var capacity: float = float(g.spots()) / g.AVG_STAY_SECONDS
+	g.hour = 8.0
+	var capacity: float = float(g.spots()) / g.STAY_SHOP_SECONDS
 	check(g.arrivals_per_sec() > capacity, "cidade grande lota o estacionamento")
 	var inc1: float = g.expected_income_per_sec()
 	g.lvl.spots = int(g.lvl.spots) + 1
@@ -90,6 +124,8 @@ func _initialize() -> void:
 	var g2 = GameScript.new()
 	g2.from_dict(parsed)
 	check(g2.spots() == g.spots(), "save mantém vagas")
+	check(is_equal_approx(g2.population(), g.population()), "save mantém moradores")
+	check(g2.day == g.day, "save mantém o dia")
 	check(g2.districts_unlocked == g.districts_unlocked, "save mantém bairros")
 	check(g2.missions_claimed.has(0), "save mantém missões")
 	check(is_equal_approx(g2.money, g.money), "save mantém dinheiro")

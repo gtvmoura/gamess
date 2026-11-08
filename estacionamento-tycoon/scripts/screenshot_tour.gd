@@ -52,33 +52,42 @@ func _run() -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	Game.reset_game()
 	Game.money = 1200.0
+	Game.hour = 7.6
 	Game.changed.emit()
 	await _wait(14.0)
 	await _shot("01_inicio")
 	await _tabs("02_inicio")
 
 	# Cidade em crescimento
-	Game.lvl = {"spots": 6, "attract": 5, "price": 6, "fleet": 5, "city": 8}
+	Game.lvl = {"spots": 6, "attract": 5, "price": 6, "fleet": 5, "city": 8, "jobs": 8}
+	Game.hour = 12.5
 	Game.districts_unlocked = 3
 	Game.money = 186450.0
 	Game.gems = 75
 	Game.level = 14
 	Game.total_cars = 640
+	Game.settle_population()
 	Game.changed.emit()
 	await _wait(16.0)
 	await _shot("03_crescimento")
 	await _tabs("04_crescimento")
 
 	# Metrópole
-	Game.lvl = {"spots": 18, "attract": 14, "price": 18, "fleet": 12, "city": 16}
+	Game.lvl = {"spots": 18, "attract": 14, "price": 18, "fleet": 12, "city": 16, "jobs": 16}
+	Game.hour = 17.6
 	Game.districts_unlocked = 6
 	Game.money = 48700000.0
 	Game.gems = 320
 	Game.level = 41
 	Game.boost_until = Time.get_unix_time_from_system() + 420.0
+	Game.settle_population()
 	Game.changed.emit()
 	await _wait(16.0)
 	await _shot("05_metropole")
 	await _tabs("06_metropole")
+	# a mesma cidade à noite
+	Game.hour = 22.5
+	await _wait(2.0)
+	await _shot("07_noite")
 	Game.reset_game()
 	get_tree().quit()

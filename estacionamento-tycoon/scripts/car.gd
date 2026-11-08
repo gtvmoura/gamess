@@ -17,6 +17,7 @@ var dir := Vector2(1, 0)
 var speed := 3.0  # casas por segundo
 var path: Array[Vector2] = []
 var spot_index := -1
+var worker := false
 var kind := 0  # 0 carro, 1 caminhonete, 2 ônibus
 
 

@@ -9,10 +9,18 @@ const SAVE_PATH := "user://save.json"
 const SAVE_INTERVAL := 10.0
 const MAX_OFFLINE_SECONDS := 8.0 * 3600.0
 const OFFLINE_EFFICIENCY := 0.5
-## Tempo médio (em segundos reais) que um carro passa estacionado.
-const AVG_STAY_SECONDS := 12.0
-## Horas cobradas, em média, por carro (1 a 3 horas de "tempo do jogo").
-const AVG_STAY_HOURS := 2.0
+## Trabalhadores ficam muito tempo e pagam várias horas; compradores ficam pouco.
+const STAY_WORK_SECONDS := 24.0
+const STAY_SHOP_SECONDS := 10.0
+const HOURS_WORK := 6.0
+const HOURS_SHOP := 1.5
+## Duração de um dia do jogo, em segundos reais.
+const DAY_SECONDS := 360.0
+## Fração dos moradores em idade de trabalhar.
+const WORKING_AGE := 0.6
+## Movimento por hora do dia (0h..23h). Normalizado para média 1.
+const COMMUTE_CURVE := [0.05, 0.05, 0.05, 0.05, 0.1, 0.4, 1.4, 3.2, 3.4, 1.8, 0.9, 0.7, 0.9, 0.8, 0.6, 0.6, 0.7, 0.9, 0.6, 0.3, 0.2, 0.15, 0.1, 0.05]
+const SHOP_CURVE := [0.1, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2, 0.4, 0.6, 0.9, 1.3, 1.6, 2.0, 1.8, 1.5, 1.5, 1.6, 1.9, 2.2, 2.0, 1.5, 0.9, 0.4, 0.2]
 const BOOST_GEMS := 30
 const BOOST_SECONDS := 600.0
 
@@ -20,18 +28,19 @@ const UPGRADES := {
 	"spots": {"name": "Mais Vagas", "desc": "Aumenta a capacidade do estacionamento.", "base": 150.0, "growth": 1.55, "max": 30},
 	"attract": {"name": "Atratividade", "desc": "Lojas, segurança e cobertura atraem mais motoristas e permitem cobrar mais.", "base": 250.0, "growth": 1.7, "max": 25},
 	"price": {"name": "Preço por Hora", "desc": "Aumenta o valor cobrado por vaga. Caro demais espanta clientes!", "base": 200.0, "growth": 1.6, "max": 40},
-	"fleet": {"name": "Frota de Veículos", "desc": "Concessionárias na cidade: mais habitantes compram carros.", "base": 400.0, "growth": 1.75, "max": 20},
-	"city": {"name": "Desenvolver a Cidade", "desc": "Novas casas, prédios e empregos atraem habitantes.", "base": 1000.0, "growth": 1.85, "max": 30},
+	"fleet": {"name": "Frota de Veículos", "desc": "Concessionárias na cidade: mais moradores compram carros.", "base": 400.0, "growth": 1.75, "max": 20},
+	"city": {"name": "Moradias", "desc": "Novas casas e prédios residenciais: mais gente pode morar na cidade.", "base": 1000.0, "growth": 1.85, "max": 30},
+	"jobs": {"name": "Atrair Empresas", "desc": "Lojas, escritórios e fábricas: empregos trazem moradores e trabalhadores.", "base": 700.0, "growth": 1.8, "max": 30},
 }
 
 const DISTRICTS := [
-	{"name": "Centro", "cost": 0.0, "pop": 1.0, "income": 0.0, "desc": "Onde tudo começou."},
-	{"name": "Vila Nova", "cost": 15000.0, "pop": 0.5, "income": 0.25, "desc": "Bairro residencial + novo estacionamento."},
-	{"name": "Jardim das Flores", "cost": 90000.0, "pop": 0.75, "income": 0.5, "desc": "Comércio local e praças."},
-	{"name": "Distrito Industrial", "cost": 500000.0, "pop": 1.0, "income": 1.0, "desc": "Fábricas com muitos trabalhadores motorizados."},
-	{"name": "Beira-Rio", "cost": 3000000.0, "pop": 1.5, "income": 2.0, "desc": "Orla turística com shopping."},
-	{"name": "Centro Financeiro", "cost": 20000000.0, "pop": 2.5, "income": 4.0, "desc": "Arranha-céus e escritórios."},
-	{"name": "Aeroporto", "cost": 150000000.0, "pop": 4.0, "income": 8.0, "desc": "O maior estacionamento da região."},
+	{"name": "Centro", "cost": 0.0, "pop": 1.0, "jobs": 1.0, "income": 0.0, "desc": "Onde tudo começou."},
+	{"name": "Vila Nova", "cost": 15000.0, "pop": 0.8, "jobs": 0.2, "income": 0.25, "desc": "Bairro residencial + novo estacionamento."},
+	{"name": "Jardim das Flores", "cost": 90000.0, "pop": 0.6, "jobs": 0.6, "income": 0.5, "desc": "Comércio local e praças."},
+	{"name": "Distrito Industrial", "cost": 500000.0, "pop": 0.3, "jobs": 2.0, "income": 1.0, "desc": "Fábricas: muitos empregos e trabalhadores motorizados."},
+	{"name": "Beira-Rio", "cost": 3000000.0, "pop": 1.5, "jobs": 0.8, "income": 2.0, "desc": "Orla turística com shopping."},
+	{"name": "Centro Financeiro", "cost": 20000000.0, "pop": 1.5, "jobs": 3.5, "income": 4.0, "desc": "Arranha-céus e escritórios lotados."},
+	{"name": "Aeroporto", "cost": 150000000.0, "pop": 1.0, "jobs": 5.0, "income": 8.0, "desc": "Milhares de empregos e o maior estacionamento da região."},
 ]
 
 const PHASES := [
@@ -44,7 +53,9 @@ const MISSIONS := [
 	{"text": "Estacione 10 carros", "type": "cars", "goal": 10.0, "money": 300.0, "gems": 5},
 	{"text": "Compre 2 melhorias de vagas", "type": "lvl_spots", "goal": 2.0, "money": 500.0, "gems": 5},
 	{"text": "Atratividade no nível 3", "type": "lvl_attract", "goal": 2.0, "money": 800.0, "gems": 5},
-	{"text": "Desenvolva a cidade 2 vezes", "type": "lvl_city", "goal": 2.0, "money": 2000.0, "gems": 10},
+	{"text": "Construa moradias 2 vezes", "type": "lvl_city", "goal": 2.0, "money": 2000.0, "gems": 10},
+	{"text": "Atraia empresas 2 vezes", "type": "lvl_jobs", "goal": 2.0, "money": 2500.0, "gems": 10},
+	{"text": "Tenha 2.000 trabalhadores empregados", "type": "employed", "goal": 2000.0, "money": 8000.0, "gems": 15},
 	{"text": "Estacione 100 carros", "type": "cars", "goal": 100.0, "money": 3000.0, "gems": 10},
 	{"text": "Desbloqueie a Vila Nova", "type": "districts", "goal": 2.0, "money": 5000.0, "gems": 15},
 	{"text": "Alcance 6.000 habitantes", "type": "pop", "goal": 6000.0, "money": 20000.0, "gems": 20},
@@ -60,7 +71,11 @@ var money: float = 500.0
 var gems: int = 20
 var level: int = 1
 var xp: float = 0.0
-var lvl := {"spots": 0, "attract": 0, "price": 0, "fleet": 0, "city": 0}
+var lvl := {"spots": 0, "attract": 0, "price": 0, "fleet": 0, "city": 0, "jobs": 0}
+## Moradores atuais (crescem aos poucos até a meta definida por moradia e empregos).
+var pop: float = 1000.0
+var day: int = 1
+var hour: float = 8.0
 var districts_unlocked: int = 1
 var total_cars: int = 0
 var lost_customers: int = 0
@@ -82,6 +97,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_simulate(delta)
 	_save_timer += delta
 	if _save_timer >= SAVE_INTERVAL:
 		_save_timer = 0.0
@@ -112,7 +128,95 @@ func vehicles_per_resident() -> float:
 
 
 func population() -> float:
-	return 1000.0 * pow(1.3, float(lvl.city)) * district_pop_mult()
+	return pop
+
+
+## Quantas pessoas cabem nas moradias da cidade.
+func housing() -> float:
+	return 1200.0 * pow(1.3, float(lvl.city)) * district_pop_mult()
+
+
+func jobs() -> float:
+	return 600.0 * pow(1.3, float(lvl.get("jobs", 0))) * district_jobs_mult()
+
+
+func district_jobs_mult() -> float:
+	var m := 0.0
+	for i in districts_unlocked:
+		m += float(DISTRICTS[i].jobs)
+	return m
+
+
+func working_age() -> float:
+	return pop * WORKING_AGE
+
+
+func employed() -> float:
+	return minf(working_age(), jobs())
+
+
+func unemployment() -> float:
+	var w := working_age()
+	return 0.0 if w <= 0.0 else 1.0 - employed() / w
+
+
+## Vagas de emprego preenchidas (empresas cheias = mais trabalhadores no centro).
+func jobs_filled() -> float:
+	var j := jobs()
+	return 0.0 if j <= 0.0 else employed() / j
+
+
+## Meta de população: precisa de moradia, e só vem gente se houver emprego.
+func target_population() -> float:
+	var h := housing()
+	return minf(h, h * 0.45 + jobs() / WORKING_AGE * 0.8)
+
+
+func settle_population() -> void:
+	pop = target_population()
+
+
+func _simulate(delta: float) -> void:
+	var target := target_population()
+	pop += (target - pop) * (1.0 - exp(-delta / 40.0))
+	hour += delta * 24.0 / DAY_SECONDS
+	if hour >= 24.0:
+		hour -= 24.0
+		day += 1
+
+
+static func _curve(curve: Array, h: float) -> float:
+	var total := 0.0
+	for v in curve:
+		total += float(v)
+	var mean := total / curve.size()
+	var i := int(floor(h)) % 24
+	var j := (i + 1) % 24
+	var t := h - floor(h)
+	return lerpf(float(curve[i]), float(curve[j]), t) / mean
+
+
+func commute_mult() -> float:
+	return _curve(COMMUTE_CURVE, hour)
+
+
+func shop_mult() -> float:
+	return _curve(SHOP_CURVE, hour)
+
+
+func clock_str() -> String:
+	var m := int((hour - floor(hour)) * 60.0)
+	return "Dia %d  %02d:%02d" % [day, int(hour), m]
+
+
+func moment_str() -> String:
+	if hour < 5.5 or hour >= 22.0:
+		return "Madrugada tranquila"
+	if commute_mult() > 1.6:
+		return "Hora do rush!"
+	if shop_mult() > 1.5:
+		return "Comércio cheio"
+	return "Movimento normal"
 
 
 func district_pop_mult() -> float:
@@ -148,9 +252,27 @@ func fair_price() -> float:
 	return 8.0 + 1.2 * float(lvl.attract) + 0.25 * float(lvl.city)
 
 
-## Carros por segundo passando na frente do estacionamento.
+## Carros de trabalhadores indo para o centro (média do dia).
+func work_traffic_avg() -> float:
+	return employed() * vehicles_per_resident() * 0.0024
+
+
+## Carros de moradores indo às compras/lazer (média do dia).
+func shop_traffic_avg() -> float:
+	return pop * vehicles_per_resident() * 0.0008
+
+
+func work_traffic() -> float:
+	return work_traffic_avg() * commute_mult()
+
+
+func shop_traffic() -> float:
+	return shop_traffic_avg() * shop_mult()
+
+
+## Carros por segundo passando na frente do estacionamento agora.
 func passing_per_sec() -> float:
-	return population() * vehicles_per_resident() * 2.0 / 1000.0
+	return work_traffic() + shop_traffic()
 
 
 ## Chance de um carro que passa decidir entrar.
@@ -164,6 +286,14 @@ func arrivals_per_sec() -> float:
 	return passing_per_sec() * enter_chance()
 
 
+func work_arrivals_per_sec() -> float:
+	return work_traffic() * enter_chance()
+
+
+func shop_arrivals_per_sec() -> float:
+	return shop_traffic() * enter_chance()
+
+
 func income_mult() -> float:
 	var m := district_income_mult()
 	if is_boosted():
@@ -173,9 +303,15 @@ func income_mult() -> float:
 
 ## Receita esperada por segundo (usada para renda offline e para o HUD).
 func expected_income_per_sec() -> float:
-	var capacity := float(spots()) / AVG_STAY_SECONDS
-	var served := minf(arrivals_per_sec(), capacity)
-	return served * price() * AVG_STAY_HOURS * income_mult()
+	var w := work_traffic_avg() * enter_chance()
+	var sh := shop_traffic_avg() * enter_chance()
+	var total := w + sh
+	if total <= 0.0:
+		return 0.0
+	var avg_stay := (w * STAY_WORK_SECONDS + sh * STAY_SHOP_SECONDS) / total
+	var avg_hours := (w * HOURS_WORK + sh * HOURS_SHOP) / total
+	var served := minf(total, float(spots()) / avg_stay)
+	return served * price() * avg_hours * income_mult()
 
 
 func income_per_hour() -> float:
@@ -305,6 +441,10 @@ func mission_progress(i: int) -> float:
 			return float(lvl.attract)
 		"lvl_city":
 			return float(lvl.city)
+		"lvl_jobs":
+			return float(lvl.get("jobs", 0))
+		"employed":
+			return employed()
 		"districts":
 			return float(districts_unlocked)
 		"pop":
@@ -362,6 +502,9 @@ func to_dict() -> Dictionary:
 		"total_earned": total_earned,
 		"boost_until": boost_until,
 		"missions_claimed": missions_claimed,
+		"pop": pop,
+		"day": day,
+		"hour": hour,
 		"saved_at": Time.get_unix_time_from_system(),
 	}
 
@@ -379,6 +522,12 @@ func from_dict(d: Dictionary) -> void:
 	lost_customers = int(d.get("lost_customers", 0))
 	total_earned = float(d.get("total_earned", 0.0))
 	boost_until = float(d.get("boost_until", 0.0))
+	day = int(d.get("day", 1))
+	hour = float(d.get("hour", 8.0))
+	if d.has("pop"):
+		pop = float(d.pop)
+	else:
+		pop = minf(1000.0, target_population())
 	missions_claimed = []
 	for v in d.get("missions_claimed", []):
 		missions_claimed.append(int(v))
@@ -404,6 +553,10 @@ func load_game() -> void:
 	var elapsed := Time.get_unix_time_from_system() - saved_at
 	if saved_at > 0.0 and elapsed > 60.0:
 		offline_seconds = minf(elapsed, MAX_OFFLINE_SECONDS)
+		# a cidade continuou crescendo e o relógio andou
+		pop += (target_population() - pop) * (1.0 - exp(-offline_seconds / 40.0))
+		hour = fposmod(hour + offline_seconds * 24.0 / DAY_SECONDS, 24.0)
+		day += int(offline_seconds / DAY_SECONDS)
 		# O boost não vale para o período offline.
 		var boosted := boost_until
 		boost_until = 0.0

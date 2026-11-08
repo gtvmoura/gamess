@@ -20,7 +20,6 @@ const RIGHT_LANE_X := 31.5
 const TOP_AISLE_Y := 17.5
 const SPOTS_PER_ROW := 24
 const LANE := 0.2
-const STAY_SECONDS := 12.0        # igual a Game.AVG_STAY_SECONDS
 const ROAD_SPEED := 3.2
 const LOT_SPEED := 2.2
 
@@ -38,7 +37,8 @@ var tint: CanvasModulate
 var spot_cars: Array = []
 var block_district := {}            # Vector2i -> índice do bairro
 var district_centers: Array = []    # Vector2 (grade) por bairro
-var arrival_acc := 0.0
+var work_acc := 0.0
+var shop_acc := 0.0
 var traffic_count := 0
 var _traffic_timer := 0.0
 var _fx_budget := 4.0
@@ -153,8 +153,13 @@ func _in_front_of_lot(b: Vector2i) -> bool:
 	return b.x >= 1 and b.x <= 4 and b.y >= 1 and b.y <= 4 and (b.x == 4 or b.y == 4)
 
 
+## Quanto o bairro é desenvolvido: depende do número de moradores.
+func _pop_level() -> float:
+	return maxf(0.0, log(Game.population() / 1000.0) / log(10.0))
+
+
 func _dev(dist: int) -> float:
-	var dev := float(Game.lvl.city) / 16.0 + Game.phase_index() * 0.15
+	var dev := _pop_level() * 0.48
 	if dist == 0:
 		dev += 0.15
 	elif dist >= 3:
@@ -172,7 +177,7 @@ func _rebuild() -> void:
 		_ground_key = gkey
 		queue_redraw()
 		overlay.queue_redraw()
-	var key := "%d|%d|%d|%d|%d" % [int(Game.lvl.city), Game.districts_unlocked, Game.phase_index(), int(Game.lvl.attract), Game.spots() / 48]
+	var key := "%d|%d|%d|%d" % [int(_pop_level() * 8.0), Game.districts_unlocked, int(Game.lvl.attract), Game.spots() / 48]
 	if key == _city_key:
 		return
 	_city_key = key
@@ -184,8 +189,6 @@ func _rebuild() -> void:
 	_build_lot_props()
 	_build_beach(br)
 	_build_walkers(br)
-	var tints := [Color(1, 1, 1), Color(1, 0.96, 0.9), Color(0.9, 0.8, 0.88)]
-	tint.color = tints[Game.phase_index()]
 
 
 func _prop(kind: String, x: float, y: float, w: float = 0.0, d: float = 0.0):
@@ -286,7 +289,7 @@ func _build_lot_props() -> void:
 	for u in units:
 		lamps.append(Vector2(LOT.position.x + 0.1, 19.5 + 3.0 * u))
 		lamps.append(Vector2(LOT.end.x - 0.1, 19.5 + 3.0 * u))
-	var lit := 1.0 if Game.phase_index() >= 1 else 0.0
+	var lit := 1.0
 	for i in mini(lamps.size(), a * 3):
 		var l = _prop("lamp", lamps[i].x, lamps[i].y)
 		l.lit_chance = lit
@@ -333,7 +336,7 @@ func _build_beach(br: RandomNumberGenerator) -> void:
 
 func _build_walkers(br: RandomNumberGenerator) -> void:
 	br.seed = 4242 + Game.districts_unlocked
-	var count := 12 + 14 * Game.phase_index() + Game.districts_unlocked * 2
+	var count := clampi(int(Game.population() / 400.0), 8, 70)
 	var blocks: Array = []
 	for b in block_district.keys():
 		if block_district[b] < Game.districts_unlocked:
@@ -382,14 +385,15 @@ func spot_aisle(i: int) -> float:
 # ---------------------------------------------------------------- Simulação
 
 func _process(delta: float) -> void:
-	arrival_acc = minf(arrival_acc + Game.arrivals_per_sec() * delta, 4.0)
-	while arrival_acc >= 1.0:
-		arrival_acc -= 1.0
-		var idx := _free_spot()
-		if idx == -1:
-			Game.lost_customers += 1
-		else:
-			_spawn_arrival(idx)
+	work_acc = minf(work_acc + Game.work_arrivals_per_sec() * delta, 4.0)
+	shop_acc = minf(shop_acc + Game.shop_arrivals_per_sec() * delta, 4.0)
+	while work_acc >= 1.0:
+		work_acc -= 1.0
+		_try_arrival(true)
+	while shop_acc >= 1.0:
+		shop_acc -= 1.0
+		_try_arrival(false)
+	_update_daylight()
 	_traffic_timer += delta
 	var target := clampi(int(Game.passing_per_sec() * 5.0), 6, 45)
 	if _traffic_timer >= 0.35 and traffic_count < target:
@@ -401,6 +405,30 @@ func _process(delta: float) -> void:
 		if c != null:
 			n += 1
 	Game.occupied = n
+
+
+func _try_arrival(worker: bool) -> void:
+	var idx := _free_spot()
+	if idx == -1:
+		Game.lost_customers += 1
+	else:
+		_spawn_arrival(idx, worker)
+
+
+## Cor da luz conforme a hora do dia (amanhecer, dia, entardecer, noite).
+func _update_daylight() -> void:
+	var h: float = Game.hour
+	var keys := [
+		[0.0, Color(0.42, 0.47, 0.72)], [5.0, Color(0.45, 0.5, 0.75)], [6.5, Color(1.0, 0.82, 0.72)],
+		[8.0, Color(1, 1, 1)], [16.5, Color(1, 1, 1)], [18.0, Color(1.0, 0.82, 0.66)],
+		[19.5, Color(0.62, 0.58, 0.8)], [21.0, Color(0.42, 0.47, 0.72)], [24.0, Color(0.42, 0.47, 0.72)]]
+	for i in keys.size() - 1:
+		var a: Array = keys[i]
+		var b: Array = keys[i + 1]
+		if h >= float(a[0]) and h <= float(b[0]):
+			var t := (h - float(a[0])) / maxf(0.001, float(b[0]) - float(a[0]))
+			tint.color = (a[1] as Color).lerp(b[1] as Color, t)
+			return
 
 
 func _free_spot() -> int:
@@ -529,7 +557,7 @@ func _exit_road() -> Array:
 	return _lane([Vector2(EXIT_X, 16.5), Vector2(r, 16.5), Vector2(r, 0.5)])
 
 
-func _spawn_arrival(idx: int) -> void:
+func _spawn_arrival(idx: int, worker: bool) -> void:
 	var road := _arrival_road()
 	var car = _new_car(road[0])
 	if car.kind == 2:
@@ -537,6 +565,7 @@ func _spawn_arrival(idx: int) -> void:
 		car.body_color = CarScript.COLORS[rng.randi_range(0, 5)]
 		car.queue_redraw()
 	car.spot_index = idx
+	car.worker = worker
 	spot_cars[idx] = car
 	var c := spot_center(idx)
 	var aisle := spot_aisle(idx)
@@ -554,7 +583,8 @@ func _on_car_parked(car) -> void:
 		_despawn(car)
 		return
 	Game.car_parked()
-	var stay := rng.randf_range(STAY_SECONDS - 4.0, STAY_SECONDS + 4.0)
+	var base: float = Game.STAY_WORK_SECONDS if car.worker else Game.STAY_SHOP_SECONDS
+	var stay := rng.randf_range(base * 0.7, base * 1.3)
 	get_tree().create_timer(stay).timeout.connect(_car_leave.bind(car))
 
 
@@ -562,7 +592,8 @@ func _car_leave(car) -> void:
 	if not is_instance_valid(car):
 		return
 	var idx: int = car.spot_index
-	var paid := Game.car_paid(Game.price() * rng.randi_range(1, 3))
+	var hours: float = rng.randf_range(4.0, 8.0) if car.worker else rng.randf_range(1.0, 2.0)
+	var paid := Game.car_paid(Game.price() * roundf(hours * 2.0) / 2.0)
 	_floating_text("+" + Game.money_str(paid), Iso.pg(car.grid, 26.0))
 	var aisle := spot_aisle(idx)
 	var pts: Array = [
