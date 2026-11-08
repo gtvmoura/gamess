@@ -1,0 +1,60 @@
+name: Estacionamento Tycoon - Testes e APK Android
+
+on:
+  push:
+    paths: ["estacionamento-tycoon/**", ".github/workflows/estacionamento-tycoon.yml"]
+  pull_request:
+    paths: ["estacionamento-tycoon/**", ".github/workflows/estacionamento-tycoon.yml"]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    container: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Importar projeto
+        run: timeout 300 godot --headless --import --path estacionamento-tycoon || true
+      - name: Testes de economia
+        run: godot --headless --path estacionamento-tycoon --script res://tests/run_tests.gd
+      - name: Rodar o jogo (simula 30 segundos)
+        run: |
+          timeout 300 godot --headless --path estacionamento-tycoon --fixed-fps 60 --quit-after 1800 2>&1 | tee run.log
+          if grep -nE "SCRIPT ERROR|Parse Error|Invalid call|Invalid access|Invalid get|Invalid set" run.log; then
+            echo "Erros encontrados ao rodar o jogo"; exit 1
+          fi
+
+  android:
+    needs: testes
+    runs-on: ubuntu-latest
+    container: barichello/godot-ci:4.3
+    env:
+      GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /root/debug.keystore
+      GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+      GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar Godot e keystore de debug
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates/ ~/.config/
+          if [ -d /root/.config/godot ] && [ "$HOME" != "/root" ]; then cp -r /root/.config/godot ~/.config/godot; fi
+          if [ "$HOME" != "/root" ]; then cp -r /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/; fi
+          if [ ! -f /root/debug.keystore ]; then
+            keytool -genkeypair -keyalg RSA -alias androiddebugkey -keypass android -storepass android \
+              -keystore /root/debug.keystore -dname "CN=Android Debug,O=Android,C=US" -validity 9999
+          fi
+      - name: Importar projeto
+        run: timeout 300 godot --headless --import --path estacionamento-tycoon || true
+      - name: Exportar APK
+        run: |
+          mkdir -p build/android
+          OUT="$(pwd)/build/android/estacionamento-tycoon.apk"
+          godot --headless --path estacionamento-tycoon --export-debug "Android" "$OUT"
+          ls -la build/android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: estacionamento-tycoon-apk
+          path: build/android/estacionamento-tycoon.apk
