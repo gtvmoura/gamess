@@ -74,6 +74,7 @@ jobs:
           files: build/android/estacionamento-tycoon.apk
       - name: Publicar APK na branch "apk"
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: bash
         run: |
           git config --global --add safe.directory "$PWD"
           mkdir apk-branch && cp build/android/estacionamento-tycoon.apk apk-branch/
