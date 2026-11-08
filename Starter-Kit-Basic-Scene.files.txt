@@ -1,0 +1,64 @@
+./.gitattributes
+./.gitignore
+./LICENSE.md
+./README.md
+./icon.png
+./icon.png.import
+./project.godot
+./sample/Mini Arena/License.txt
+./sample/Mini Arena/Models/GLB format/Textures/colormap.png
+./sample/Mini Arena/Models/GLB format/Textures/colormap.png.import
+./sample/Mini Arena/Models/GLB format/Textures/colormap.png.import~RF8ea903a4.TMP
+./sample/Mini Arena/Models/GLB format/banner.glb
+./sample/Mini Arena/Models/GLB format/banner.glb.import
+./sample/Mini Arena/Models/GLB format/block.glb
+./sample/Mini Arena/Models/GLB format/block.glb.import
+./sample/Mini Arena/Models/GLB format/border-corner.glb
+./sample/Mini Arena/Models/GLB format/border-corner.glb.import
+./sample/Mini Arena/Models/GLB format/border-straight.glb
+./sample/Mini Arena/Models/GLB format/border-straight.glb.import
+./sample/Mini Arena/Models/GLB format/bricks.glb
+./sample/Mini Arena/Models/GLB format/bricks.glb.import
+./sample/Mini Arena/Models/GLB format/character-soldier.glb
+./sample/Mini Arena/Models/GLB format/character-soldier.glb.import
+./sample/Mini Arena/Models/GLB format/colormap.tres
+./sample/Mini Arena/Models/GLB format/column-damaged.glb
+./sample/Mini Arena/Models/GLB format/column-damaged.glb.import
+./sample/Mini Arena/Models/GLB format/column.glb
+./sample/Mini Arena/Models/GLB format/column.glb.import
+./sample/Mini Arena/Models/GLB format/floor-detail.glb
+./sample/Mini Arena/Models/GLB format/floor-detail.glb.import
+./sample/Mini Arena/Models/GLB format/floor.glb
+./sample/Mini Arena/Models/GLB format/floor.glb.import
+./sample/Mini Arena/Models/GLB format/stairs-corner-inner.glb
+./sample/Mini Arena/Models/GLB format/stairs-corner-inner.glb.import
+./sample/Mini Arena/Models/GLB format/stairs-corner.glb
+./sample/Mini Arena/Models/GLB format/stairs-corner.glb.import
+./sample/Mini Arena/Models/GLB format/stairs.glb
+./sample/Mini Arena/Models/GLB format/stairs.glb.import
+./sample/Mini Arena/Models/GLB format/statue.glb
+./sample/Mini Arena/Models/GLB format/statue.glb.import
+./sample/Mini Arena/Models/GLB format/tree.glb
+./sample/Mini Arena/Models/GLB format/tree.glb.import
+./sample/Mini Arena/Models/GLB format/trophy.glb
+./sample/Mini Arena/Models/GLB format/trophy.glb.import
+./sample/Mini Arena/Models/GLB format/wall-corner.glb
+./sample/Mini Arena/Models/GLB format/wall-corner.glb.import
+./sample/Mini Arena/Models/GLB format/wall-gate.glb
+./sample/Mini Arena/Models/GLB format/wall-gate.glb.import
+./sample/Mini Arena/Models/GLB format/wall.glb
+./sample/Mini Arena/Models/GLB format/wall.glb.import
+./sample/Mini Arena/Models/GLB format/weapon-rack.glb
+./sample/Mini Arena/Models/GLB format/weapon-rack.glb.import
+./sample/Mini Arena/Models/GLB format/weapon-spear.glb
+./sample/Mini Arena/Models/GLB format/weapon-spear.glb.import
+./sample/Mini Arena/Models/GLB format/weapon-sword.glb
+./sample/Mini Arena/Models/GLB format/weapon-sword.glb.import
+./sample/Mini Arena/Visit Kenney.url
+./sample/Mini Arena/Visit Patreon.url
+./scenes/main-environment.tres
+./scenes/main.tscn
+./screenshots/.gdignore
+./screenshots/screenshot.png
+./splash-screen.png
+./splash-screen.png.import
